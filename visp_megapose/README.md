@@ -31,6 +31,7 @@ Tutorial: Tracking with MegaPose](https://visp-doc.inria.fr/doxygen/visp-daily/t
 
 The following third-party packages are recommended to be installed from source code:
 - ViSP 3.6.0
+  [Tutorial: Installation from source for Linux Ubuntu or Debian](https://visp-doc.inria.fr/doxygen/visp-daily/tutorial-install-ubuntu.html)
 - OpenCV 4.7.0 (GPU version) 
 
 	⚠️There may be a conflict with ROS2's OpenCV. Please follow the official  [tutorial](https://visp-doc.inria.fr/doxygen/visp-daily/tutorial-detection-dnn.html) to remove the version installed by ROS2.
