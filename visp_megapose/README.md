@@ -31,7 +31,6 @@ Tutorial: Tracking with MegaPose](https://visp-doc.inria.fr/doxygen/visp-daily/t
 
 The following third-party packages are recommended to be installed from source code:
 - ViSP 3.6.0
-  [Tutorial: Installation from source for Linux Ubuntu or Debian](https://visp-doc.inria.fr/doxygen/visp-daily/tutorial-install-ubuntu.html)
 - OpenCV 4.7.0 (GPU version) 
 
 	⚠️There may be a conflict with ROS2's OpenCV. Please follow the official  [tutorial](https://visp-doc.inria.fr/doxygen/visp-daily/tutorial-detection-dnn.html) to remove the version installed by ROS2.
@@ -126,12 +125,12 @@ The fellowing ROS2 Denpendence recommand install by source code.
 1. Download the bag file 
 
 https://drive.google.com/file/d/19j8EUod1O1bmtc549R-V6tZ8BN8O80-c/view?usp=sharing
-	
+
 	$ unzip visp_megapose_bag.zip
 
 2. Play the ROS2 bag file:
 
-	$ ros2 bag play visp_megapose_bag
+	$ ros2 bag play megapose_bag/subset
 
 3. Run the visp_megapose Demo:
 
