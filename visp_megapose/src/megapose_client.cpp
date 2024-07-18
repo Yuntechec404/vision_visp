@@ -19,6 +19,7 @@
 #include <image_transport/subscriber_filter.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 
 // ROS2 message filter includes
 #include <message_filters/subscriber.h>
@@ -55,6 +56,8 @@ class MegaPoseClient : public rclcpp::Node
 private:
   image_transport::SubscriberFilter raw_image_subscriber;
   message_filters::Subscriber<sensor_msgs::msg::CameraInfo> camera_info_subscriber;
+  rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pub_pose_;
+
   void frameCallback(const sensor_msgs::msg::Image::ConstSharedPtr &image,
                      const sensor_msgs::msg::CameraInfo::ConstSharedPtr &cam_info);
   bool got_image_;
@@ -81,7 +84,7 @@ private:
   void render_service_response_callback(rclcpp::Client<visp_megapose::srv::Render>::SharedFuture future);
   bool render_request_done_;
 
-  void broadcastTransform(const geometry_msgs::msg::Transform &transform, const std::string &child_frame_id, const std::string &camera_tf);
+  void broadcastTransformAndPose(const geometry_msgs::msg::Transform &transform, const std::string &child_frame_id, const std::string &camera_tf);
   geometry_msgs::msg::Transform transform_;
 
   vpColor interpolate(const vpColor &low, const vpColor &high, const float f);
@@ -153,15 +156,27 @@ void MegaPoseClient::frameCallback(const sensor_msgs::msg::Image::ConstSharedPtr
 
   got_image_ = true;
 }
-void MegaPoseClient::broadcastTransform(const geometry_msgs::msg::Transform &transform, const std::string &child_frame_id, const std::string &camera_tf)
+void MegaPoseClient::broadcastTransformAndPose(const geometry_msgs::msg::Transform &transform, const std::string &objectName, const std::string &camera_tf)
 {
+  // broadcast transform
   static auto tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
   static geometry_msgs::msg::TransformStamped transformStamped;
   transformStamped.header.stamp = this->get_clock()->now();
   transformStamped.header.frame_id = camera_tf;
-  transformStamped.child_frame_id = child_frame_id;
+  transformStamped.child_frame_id = objectName;
   transformStamped.transform = transform;
   tf_broadcaster_->sendTransform(transformStamped);
+  // publish target pose
+  static auto pub_pose_ = this->create_publisher<geometry_msgs::msg::Pose>(objectName, 1);
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = transform.translation.x;
+  pose.position.y = transform.translation.y;
+  pose.position.z = transform.translation.z;
+  pose.orientation.x = transform.rotation.x;
+  pose.orientation.y = transform.rotation.y;
+  pose.orientation.z = transform.rotation.z;
+  pose.orientation.w = transform.rotation.w;
+  pub_pose_->publish(pose);
 }
 void MegaPoseClient::spin()
 {
@@ -259,7 +274,6 @@ void MegaPoseClient::spin()
       if (getDetectionMethodFromString(detectorMethod) == DNN)
       {
         detection = detectObjectForInitMegaposeDnn(objectName);
-        printf("DNN");
       }
 
       else if (getDetectionMethodFromString(detectorMethod) == CLICK)
@@ -326,7 +340,7 @@ void MegaPoseClient::spin()
       M = visp_bridge::toVispHomogeneousMatrix(transform_);
       vpDisplay::displayFrame(vpI_, M, vpcam_info_, 0.05, vpColor::none, 3);
       displayScore(confidence_);
-      broadcastTransform(transform_, objectName, camera_tf);
+      broadcastTransformAndPose(transform_, objectName, camera_tf);
     }
 
     vpDisplay::flush(vpI_);
@@ -364,17 +378,14 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
   }
   if (matchingDetections.size() == 0)
   {
-    printf("No matching detections\n");
     return std::nullopt;
   }
   else if (matchingDetections.size() == 1)
   {
-    printf("One matching detection\n");
     return matchingDetections[0].getBoundingBox();
   }
   else
   {
-    printf("Multiple matching detections\n");
     vpRect best;
     double highestConf = 0.0;
     for (const auto &detection : matchingDetections)
