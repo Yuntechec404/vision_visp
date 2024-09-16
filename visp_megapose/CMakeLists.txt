@@ -36,9 +36,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/Init.srv"
   "srv/Track.srv"
   "srv/Render.srv"
+  "msg/Confidence.msg"
   DEPENDENCIES std_msgs sensor_msgs geometry_msgs
 )
 # service message
+# message
 
 add_executable(megapose_client src/megapose_client.cpp)
 ament_target_dependencies(megapose_client

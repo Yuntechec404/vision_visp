@@ -11,7 +11,7 @@
 #include <visp_bridge/camera.h>
 #include <visp_bridge/image.h>
 #include <opencv4/opencv2/opencv.hpp>
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 
 // ROS2 includes
 #include "tf2_ros/transform_broadcaster.h"
@@ -25,6 +25,7 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/synchronizer.h>
+#include <visp_megapose/msg/confidence.hpp>
 
 // ROS2 visp_megapose Server includes
 #include <visp_megapose/srv/init.hpp>
@@ -57,6 +58,7 @@ private:
   image_transport::SubscriberFilter raw_image_subscriber;
   message_filters::Subscriber<sensor_msgs::msg::CameraInfo> camera_info_subscriber;
   rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pub_pose_;
+  rclcpp::Publisher<visp_megapose::msg::Confidence>::SharedPtr pub_confidence_;
 
   void frameCallback(const sensor_msgs::msg::Image::ConstSharedPtr &image,
                      const sensor_msgs::msg::CameraInfo::ConstSharedPtr &cam_info);
@@ -83,8 +85,10 @@ private:
   bool track_request_done_;
   void render_service_response_callback(rclcpp::Client<visp_megapose::srv::Render>::SharedFuture future);
   bool render_request_done_;
+  float confidence_score;
 
   void broadcastTransformAndPose(const geometry_msgs::msg::Transform &transform, const std::string &child_frame_id, const std::string &camera_tf);
+  void broadcastConfidenceScore(const std::string &child_frame_id, float confidence_score, bool initialized_);
   geometry_msgs::msg::Transform transform_;
 
   vpColor interpolate(const vpColor &low, const vpColor &high, const float f);
@@ -178,6 +182,16 @@ void MegaPoseClient::broadcastTransformAndPose(const geometry_msgs::msg::Transfo
   pose.orientation.w = transform.rotation.w;
   pub_pose_->publish(pose);
 }
+void MegaPoseClient::broadcastConfidenceScore(const std::string &objectName, float confidence_score, bool detection)
+{
+  // publish confidence score
+  static auto pub_confidence_ = this->create_publisher<visp_megapose::msg::Confidence>(objectName + "_confidence", 1);
+  visp_megapose::msg::Confidence confidence_msg;
+  confidence_msg.object_confidence = confidence_score;
+  confidence_msg.model_detection = detection;
+  pub_confidence_->publish(confidence_msg);
+}
+
 void MegaPoseClient::spin()
 {
   // Get parameters
@@ -205,7 +219,12 @@ void MegaPoseClient::spin()
   std::string detectorConfig = "none";
   std::string detectorFramework = "onnx", detectorTypeString = "yolov7";
   std::string objectName = this->declare_parameter<std::string>("object_name", "cube");
+  bool renderEnable = this->declare_parameter<bool>("render_enable", "True");
+  bool UIEnable = this->declare_parameter<bool>("UI_enable", "True");
+  
   RCLCPP_INFO(this->get_logger(), "Object name: %s", objectName.c_str());
+  RCLCPP_INFO(this->get_logger(), "render enable: %s", renderEnable ? "True" : "False");
+  RCLCPP_INFO(this->get_logger(), "UI enable: %s", UIEnable ? "True" : "False");
   std::vector<std::string> labels = {objectName};
 
   // Subscribe to image and camera info topics
@@ -241,8 +260,11 @@ void MegaPoseClient::spin()
 
   d = new vpDisplayX();
   rclcpp::spin_some(this->get_node_base_interface());
-  d->init(vpI_); // also init display   //顯示MegaPose可視化界面可以關閉減低效能
-  vpDisplay::setTitle(vpI_, "MegaPoseClient debug display");    //顯示MegaPose可視化界面可以關閉減低效能
+  if(UIEnable)
+  {
+    d->init(vpI_); // also init display   //顯示MegaPose可視化界面可以關閉減低效能
+    vpDisplay::setTitle(vpI_, "MegaPoseClient debug display");    //顯示MegaPose可視化界面可以關閉減低效能
+  }
 
   auto initial_pose_client = this->create_client<visp_megapose::srv::Init>("initial_pose");
 
@@ -315,7 +337,7 @@ void MegaPoseClient::spin()
         track_request_done_ = false;
       }
       static auto render_request = std::make_shared<visp_megapose::srv::Render::Request>();
-      if (render_request_done_ && overlayModel_)
+      if (render_request_done_ && overlayModel_ && renderEnable)
       {
         render_request->object_name = objectName;
         render_request->pose = transform_;
@@ -342,6 +364,7 @@ void MegaPoseClient::spin()
       displayScore(confidence_);
       broadcastTransformAndPose(transform_, objectName, camera_tf);
     }
+    broadcastConfidenceScore(objectName,confidence_,initialized_);
 
     vpDisplay::flush(vpI_);
     vpMouseButton::vpMouseButtonType button;
