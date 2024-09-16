@@ -11,7 +11,7 @@
 #include <visp_bridge/camera.h>
 #include <visp_bridge/image.h>
 #include <opencv4/opencv2/opencv.hpp>
-#include <cv_bridge/cv_bridge.hpp>
+#include <cv_bridge/cv_bridge.h>
 
 // ROS2 includes
 #include "tf2_ros/transform_broadcaster.h"
@@ -241,8 +241,8 @@ void MegaPoseClient::spin()
 
   d = new vpDisplayX();
   rclcpp::spin_some(this->get_node_base_interface());
-  d->init(vpI_); // also init display
-  vpDisplay::setTitle(vpI_, "MegaPoseClient debug display");
+  d->init(vpI_); // also init display   //顯示MegaPose可視化界面可以關閉減低效能
+  vpDisplay::setTitle(vpI_, "MegaPoseClient debug display");    //顯示MegaPose可視化界面可以關閉減低效能
 
   auto initial_pose_client = this->create_client<visp_megapose::srv::Init>("initial_pose");
 
