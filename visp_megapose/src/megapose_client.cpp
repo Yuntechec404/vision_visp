@@ -263,7 +263,7 @@ void MegaPoseClient::spin()
   if(UIEnable)
   {
     d->init(vpI_); // also init display   //顯示MegaPose可視化界面可以關閉減低效能
-    vpDisplay::setTitle(vpI_, "MegaPoseClient debug display");    //顯示MegaPose可視化界面可以關閉減低效能
+    vpDisplay::setTitle(vpI_, "MegaPose debug display " + objectName);    //顯示MegaPose可視化界面可以關閉減低效能
   }
 
   auto initial_pose_client = this->create_client<visp_megapose::srv::Init>("initial_pose");
