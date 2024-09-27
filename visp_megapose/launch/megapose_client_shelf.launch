@@ -9,13 +9,17 @@
     <!-- select the detection method (CLICK or DNN) -->
     <param name="detector_method" value="DNN"/>  
     <!-- set the path to the model directory, format is yolov7 onnx -->
-    <param name="detector_model_path" value="$(find-pkg-share visp_megapose)/data/reck.onnx"/>
+    <param name="detector_model_path" value="$(find-pkg-share visp_megapose)/data/shelf.onnx"/>
     <!-- set the DNN detector detect object name -->
-    <param name="object_name" value="reck"/>
+    <param name="object_name" value="shelf"/>
     <!-- set the Render Object Service Enable (True or False) -->
     <param name="render_enable" value="False"/>
     <!-- set the UI Enable (True or False) -->
     <param name="UI_enable" value="True"/>
+    <!-- set the detection mode (Auto:real-time detection or Manual:Waiting for flag signal to start detection) -->
+    <param name="detection_mode" value="Manual"/>
+    <!-- set the detection allowed topic (detection_mode == "Manual": /shelf_detection_allowed or /pallet_detection_allowed) -->
+    <param name="detection_allowed_topic" value="/shelf_detection_allowed"/>
   </node>
 
 </launch>

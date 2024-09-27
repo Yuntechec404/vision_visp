@@ -1,7 +1,7 @@
 # Blender 4.2.0
 # www.blender.org
-mtllib reck.mtl
-o reck
+mtllib shelf.mtl
+o shelf
 v 0.250494 -0.211167 0.019059
 v 0.245786 -0.210640 0.031715
 v 0.253190 -0.212643 -0.035839

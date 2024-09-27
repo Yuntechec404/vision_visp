@@ -1,4 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
+#include "std_msgs/msg/string.hpp"
+#include <string>
 #include <filesystem>  // C++17 filesystem library for checking file existence
 
 // visp includes
@@ -57,6 +59,7 @@ class MegaPoseClient : public rclcpp::Node
 private:
   image_transport::SubscriberFilter raw_image_subscriber;
   message_filters::Subscriber<sensor_msgs::msg::CameraInfo> camera_info_subscriber;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_detection_allowed;
   rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pub_pose_;
   rclcpp::Publisher<visp_megapose::msg::Confidence>::SharedPtr pub_confidence_;
 
@@ -73,7 +76,8 @@ private:
 
   vpImage<vpRGBa> vpI_;                          // Image used for debug display
   sensor_msgs::msg::Image::ConstSharedPtr rosI_; // Image received from ROS2
-
+  std::string detectionMode;
+  std::string detection_allowed_state_ = "not_allowed";
   double reinitThreshold_;
   double confidence_;
 
@@ -103,6 +107,7 @@ private:
   vpDetectorDNNOpenCV dnn_;
 
 public:
+  void detectionAllowedCallback(const std_msgs::msg::String::SharedPtr msg);
   MegaPoseClient();
   ~MegaPoseClient();
   void spin();
@@ -160,6 +165,21 @@ void MegaPoseClient::frameCallback(const sensor_msgs::msg::Image::ConstSharedPtr
 
   got_image_ = true;
 }
+void MegaPoseClient::detectionAllowedCallback(const std_msgs::msg::String::SharedPtr msg)
+{
+  if (msg->data == "allowed")
+  {
+    detection_allowed_state_ = "allowed";
+  } 
+  else if (msg->data == "not_allowed")
+  {
+    detection_allowed_state_ = "not_allowed";
+  } 
+  else
+  {
+    detection_allowed_state_ = "not_allowed";
+  }
+}
 void MegaPoseClient::broadcastTransformAndPose(const geometry_msgs::msg::Transform &transform, const std::string &objectName, const std::string &camera_tf)
 {
   // broadcast transform
@@ -198,8 +218,10 @@ void MegaPoseClient::spin()
   std::string image_topic = this->declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw");
   std::string camera_info_topic = this->declare_parameter<std::string>("camera_info_topic", "/camera/camera/color/camera_info");
   std::string camera_tf = this->declare_parameter<std::string>("camera_tf", "camera_color_optical_frame");
+  std::string detection_allowed_topic = this->declare_parameter<std::string>("detection_allowed_topic", "/shelf_detection_allowed");
   RCLCPP_INFO(this->get_logger(), "Subscribing to image topic: %s", image_topic.c_str());
   RCLCPP_INFO(this->get_logger(), "Subscribing to camera info topic: %s", camera_info_topic.c_str());
+  RCLCPP_INFO(this->get_logger(), "Subscribing to detection allowed topic: %s", detection_allowed_topic.c_str());
 
   std::string detectorMethod = this->declare_parameter<std::string>("detector_method", "DNN");
   RCLCPP_INFO(this->get_logger(), "Detection method: %s", detectorMethod.c_str());
@@ -219,15 +241,19 @@ void MegaPoseClient::spin()
   std::string detectorConfig = "none";
   std::string detectorFramework = "onnx", detectorTypeString = "yolov7";
   std::string objectName = this->declare_parameter<std::string>("object_name", "cube");
+  detectionMode = this->declare_parameter<std::string>("detection_mode", "Auto");
   bool renderEnable = this->declare_parameter<bool>("render_enable", "True");
   bool UIEnable = this->declare_parameter<bool>("UI_enable", "True");
   
   RCLCPP_INFO(this->get_logger(), "Object name: %s", objectName.c_str());
+  RCLCPP_INFO(this->get_logger(), "detection mode: %s", detectionMode.c_str());
   RCLCPP_INFO(this->get_logger(), "render enable: %s", renderEnable ? "True" : "False");
   RCLCPP_INFO(this->get_logger(), "UI enable: %s", UIEnable ? "True" : "False");
   std::vector<std::string> labels = {objectName};
 
   // Subscribe to image and camera info topics
+  sub_detection_allowed = this->create_subscription<std_msgs::msg::String>(
+      detection_allowed_topic.c_str(), 10, std::bind(&MegaPoseClient::detectionAllowedCallback, this, std::placeholders::_1));
   raw_image_subscriber.subscribe(this, image_topic, "raw");
   camera_info_subscriber.subscribe(this, camera_info_topic);
   synchronizer_ = std::make_shared<Synchronizer>(SyncPolicy(10), raw_image_subscriber, camera_info_subscriber);
@@ -263,7 +289,7 @@ void MegaPoseClient::spin()
   if(UIEnable)
   {
     d->init(vpI_); // also init display   //顯示MegaPose可視化界面可以關閉減低效能
-    vpDisplay::setTitle(vpI_, "MegaPose debug display " + objectName);    //顯示MegaPose可視化界面可以關閉減低效能
+    vpDisplay::setTitle(vpI_, "MegaPose debug " + objectName);    //顯示MegaPose可視化界面可以關閉減低效能
   }
 
   auto initial_pose_client = this->create_client<visp_megapose::srv::Init>("initial_pose");
@@ -289,18 +315,24 @@ void MegaPoseClient::spin()
   {
     vpDisplay::display(vpI_);
     rclcpp::spin_some(this->get_node_base_interface());
+    vpDisplay::displayText(vpI_, 40, 20, "Detection allowed state: " + detection_allowed_state_, vpColor::red);
 
     if (!initialized_)
     {
       std::optional<vpRect> detection = std::nullopt;
-      if (getDetectionMethodFromString(detectorMethod) == DNN)
-      {
-        detection = detectObjectForInitMegaposeDnn(objectName);
-      }
 
-      else if (getDetectionMethodFromString(detectorMethod) == CLICK)
+      if (getDetectionMethodFromString(detectorMethod) == CLICK)
       {
         detection = detectObjectForInitMegaposeClick();
+      }
+      else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Auto")
+      {
+        detection_allowed_state_ = "allowed";
+        detection = detectObjectForInitMegaposeDnn(objectName);
+      }
+      else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Manual" && detection_allowed_state_ == "allowed")
+      {
+        detection = detectObjectForInitMegaposeDnn(objectName);
       }
 
       if (detection && init_request_done_)
@@ -320,7 +352,7 @@ void MegaPoseClient::spin()
         init_request_done_ = false;
       }
     }
-    else if (initialized_)
+    else if (initialized_ && (detectionMode == "Auto" || detection_allowed_state_ == "allowed"))
     {
       static auto track_pose_request = std::make_shared<visp_megapose::srv::Track::Request>();
       if (track_request_done_)
@@ -445,7 +477,12 @@ void MegaPoseClient::track_pose_service_response_callback(rclcpp::Client<visp_me
   track_request_done_ = true;
   transform_ = future.get()->pose;
   confidence_ = future.get()->confidence;
-  if (confidence_ < reinitThreshold_)
+  if (detectionMode == "Manual" && detection_allowed_state_ == "not_allowed")
+  {
+    initialized_ = false;
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "No tracking allowed, waiting for tracking permission...");
+  }
+  else if (confidence_ < reinitThreshold_)
   {
     initialized_ = false;
     RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Tracking lost, reinitializing...");
