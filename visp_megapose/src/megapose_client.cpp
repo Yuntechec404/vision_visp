@@ -66,6 +66,7 @@ private:
   void frameCallback(const sensor_msgs::msg::Image::ConstSharedPtr &image,
                      const sensor_msgs::msg::CameraInfo::ConstSharedPtr &cam_info);
   bool got_image_;
+  bool UIEnable;
   vpCameraParameters vpcam_info_;
   sensor_msgs::msg::CameraInfo::ConstSharedPtr roscam_info_;
   unsigned width_, height_;
@@ -158,12 +159,15 @@ void MegaPoseClient::frameCallback(const sensor_msgs::msg::Image::ConstSharedPtr
 {
   rosI_ = image;
   roscam_info_ = cam_info;
-  vpI_ = visp_bridge::toVispImageRGBa(*image);
-  vpcam_info_ = visp_bridge::toVispCameraParameters(*cam_info);
   width_ = image->width;
   height_ = image->height;
-
+  if(UIEnable)
+  {
+    vpI_ = visp_bridge::toVispImageRGBa(*image);
+    vpcam_info_ = visp_bridge::toVispCameraParameters(*cam_info);
+  }
   got_image_ = true;
+  
 }
 void MegaPoseClient::detectionAllowedCallback(const std_msgs::msg::String::SharedPtr msg)
 {
@@ -243,7 +247,7 @@ void MegaPoseClient::spin()
   std::string objectName = this->declare_parameter<std::string>("object_name", "cube");
   detectionMode = this->declare_parameter<std::string>("detection_mode", "Auto");
   bool renderEnable = this->declare_parameter<bool>("render_enable", "True");
-  bool UIEnable = this->declare_parameter<bool>("UI_enable", "True");
+  UIEnable = this->declare_parameter<bool>("UI_enable", "True");
   
   RCLCPP_INFO(this->get_logger(), "Object name: %s", objectName.c_str());
   RCLCPP_INFO(this->get_logger(), "detection mode: %s", detectionMode.c_str());
