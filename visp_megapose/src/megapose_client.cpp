@@ -356,7 +356,7 @@ void MegaPoseClient::spin()
         init_request_done_ = false;
       }
     }
-    else if (initialized_ && (detectionMode == "Auto" || detection_allowed_state_ == "allowed"))
+    else if (initialized_)
     {
       static auto track_pose_request = std::make_shared<visp_megapose::srv::Track::Request>();
       if (track_request_done_)
