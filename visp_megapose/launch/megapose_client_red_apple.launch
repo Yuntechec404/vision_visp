@@ -16,6 +16,8 @@
     <param name="render_enable" value="False"/>
     <!-- set the UI Enable (True or False) -->
     <param name="UI_enable" value="True"/>
+    <!-- set the average sample number -->
+    <param name="buffer_size" value="5"/>
   </node>
 
 </launch>

@@ -60,7 +60,7 @@ bool fileExists(const std::string &path)
 class MegaPoseClient : public rclcpp::Node
 {
 private:
-  std::ofstream data_file_;
+  // std::ofstream data_file_;
   std::deque<double> buffer_x, buffer_y, buffer_z,buffer_qw, buffer_qx, buffer_qy, buffer_qz;
   size_t buffer_size = this->declare_parameter<int>("buffer_size",5);
   double filt_x = 0.0, filt_y = 0.0, filt_z = 0.0, filt_qw = 0.0, filt_qx = 0.0, filt_qy = 0.0, filt_qz = 0.0;
@@ -134,14 +134,14 @@ MegaPoseClient::MegaPoseClient() : Node("MegaPoseClient")
   track_request_done_ = true;
   render_request_done_ = true;
   overlayModel_ = true;
-  data_file_.open("filter_.csv");
-  data_file_ << "orig_x, orig_y, orig_z, orig_qw, orig_qx, orig_qy, orig_qz, "
-    << "filt_x, filt_y, filt_z, filt_qw, filt_qx, filt_qy, filt_qz\n";
+  // data_file_.open("filter_.csv");
+  // data_file_ << "orig_x, orig_y, orig_z, orig_qw, orig_qx, orig_qy, orig_qz, "
+  //   << "filt_x, filt_y, filt_z, filt_qw, filt_qx, filt_qy, filt_qz\n";
 }
 MegaPoseClient::~MegaPoseClient()
 {
   RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Shutting down MegaPoseClient");
-  data_file_.close();
+  // data_file_.close();
   rclcpp::shutdown();
 }
 
@@ -263,11 +263,11 @@ void MegaPoseClient::filterPose(const geometry_msgs::msg::Pose &origpose, const 
   pose.orientation.w = filt_qw;
   pub_filter_->publish(pose);
   }
-  data_file_ << std::fixed << std::setprecision(6)
-    << origpose.position.x << ", " << origpose.position.y << ", " << origpose.position.z << ", "
-    << origpose.orientation.w << ", " << origpose.orientation.x << ", " << origpose.orientation.y << ", " << origpose.orientation.z << ", "
-    << filt_x << ", " << filt_y << ", " << filt_z << ", "
-    << filt_qw << ", " << filt_qx << ", " << filt_qy << ", " << filt_qz << "\n";
+  // data_file_ << std::fixed << std::setprecision(6)
+  //   << origpose.position.x << ", " << origpose.position.y << ", " << origpose.position.z << ", "
+  //   << origpose.orientation.w << ", " << origpose.orientation.x << ", " << origpose.orientation.y << ", " << origpose.orientation.z << ", "
+  //   << filt_x << ", " << filt_y << ", " << filt_z << ", "
+  //   << filt_qw << ", " << filt_qx << ", " << filt_qy << ", " << filt_qz << "\n";
 }
 double MegaPoseClient::calculateMovingAverage(const std::deque<double>& buffer)
 {

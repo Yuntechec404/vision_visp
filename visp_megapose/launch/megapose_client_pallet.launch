@@ -20,6 +20,8 @@
     <param name="detection_mode" value="Manual"/>
     <!-- set the detection allowed topic (detection_mode == "Manual": /shelf_detection_allowed or /pallet_detection_allowed) -->
     <param name="detection_allowed_topic" value="/pallet_detection_allowed"/>
+    <!-- set the average sample number -->
+    <param name="buffer_size" value="5"/>
   </node>
 
 </launch>
