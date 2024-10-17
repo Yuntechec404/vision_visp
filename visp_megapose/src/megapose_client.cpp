@@ -102,9 +102,9 @@ private:
 
   void broadcastTransformAndPose(const geometry_msgs::msg::Transform &transform, const std::string &child_frame_id, const std::string &camera_tf);
   void broadcastConfidenceScore(const std::string &child_frame_id, float confidence_score, bool initialized_);
-  void filterPose(const geometry_msgs::msg::Pose &origpose, const std::string &objectName);
+  void broadcastTransformAndPose_filter(const geometry_msgs::msg::Transform &origpose, const std::string &objectName);
   double calculateMovingAverage(const std::deque<double>& buffer);
-  geometry_msgs::msg::Transform transform_;
+  geometry_msgs::msg::Transform transform_,filter_transform_;
 
   vpColor interpolate(const vpColor &low, const vpColor &high, const float f);
   void displayScore(float);
@@ -220,48 +220,47 @@ void MegaPoseClient::broadcastTransformAndPose(const geometry_msgs::msg::Transfo
   pose.orientation.z = transform.rotation.z;
   pose.orientation.w = transform.rotation.w;
   pub_pose_->publish(pose);
-  filterPose(pose, objectName);
 }
-void MegaPoseClient::filterPose(const geometry_msgs::msg::Pose &origpose, const std::string &objectName)
+void MegaPoseClient::broadcastTransformAndPose_filter(const geometry_msgs::msg::Transform &origpose, const std::string &objectName)
 {
   if(confidence_ > refilterThreshold_)
   {
-    if (buffer_x.size() >= buffer_size) // Update the buffer with the new pose data
-  {
-    buffer_x.pop_front();
-    buffer_y.pop_front();
-    buffer_z.pop_front();
-    buffer_qw.pop_front();
-    buffer_qx.pop_front();
-    buffer_qy.pop_front();
-    buffer_qz.pop_front();
-  }
-  buffer_x.push_back(origpose.position.x);
-  buffer_y.push_back(origpose.position.y);
-  buffer_z.push_back(origpose.position.z);
-  buffer_qw.push_back(origpose.orientation.w);
-  buffer_qx.push_back(origpose.orientation.x);
-  buffer_qy.push_back(origpose.orientation.y);
-  buffer_qz.push_back(origpose.orientation.z);
-  // Compute the moving average for position and orientation
-  filt_x = calculateMovingAverage(buffer_x);
-  filt_y = calculateMovingAverage(buffer_y);
-  filt_z = calculateMovingAverage(buffer_z);
-  filt_qw = calculateMovingAverage(buffer_qw);
-  filt_qx = calculateMovingAverage(buffer_qx);
-  filt_qy = calculateMovingAverage(buffer_qy);
-  filt_qz = calculateMovingAverage(buffer_qz);
-  // publish target pose
-  static auto pub_filter_ = this->create_publisher<geometry_msgs::msg::Pose>(objectName + "_filter", 1);
-  geometry_msgs::msg::Pose pose;
-  pose.position.x = filt_x;
-  pose.position.y = filt_y;
-  pose.position.z = filt_z;
-  pose.orientation.x = filt_qx;
-  pose.orientation.y = filt_qy;
-  pose.orientation.z = filt_qz;
-  pose.orientation.w = filt_qw;
-  pub_filter_->publish(pose);
+    if (buffer_x.size() >= buffer_size)
+    {
+      buffer_x.pop_front();
+      buffer_y.pop_front();
+      buffer_z.pop_front();
+      buffer_qw.pop_front();
+      buffer_qx.pop_front();
+      buffer_qy.pop_front();
+      buffer_qz.pop_front();
+    }
+    buffer_x.push_back(origpose.translation.x);
+    buffer_y.push_back(origpose.translation.y);
+    buffer_z.push_back(origpose.translation.z);
+    buffer_qw.push_back(origpose.rotation.w);
+    buffer_qx.push_back(origpose.rotation.x);
+    buffer_qy.push_back(origpose.rotation.y);
+    buffer_qz.push_back(origpose.rotation.z);
+
+    filter_transform_.translation.x = calculateMovingAverage(buffer_x);
+    filter_transform_.translation.y = calculateMovingAverage(buffer_y);
+    filter_transform_.translation.z = calculateMovingAverage(buffer_z);
+    filter_transform_.rotation.w = calculateMovingAverage(buffer_qw);
+    filter_transform_.rotation.x = calculateMovingAverage(buffer_qx);
+    filter_transform_.rotation.y = calculateMovingAverage(buffer_qy);
+    filter_transform_.rotation.z = calculateMovingAverage(buffer_qz);
+
+    static auto pub_filter_ = this->create_publisher<geometry_msgs::msg::Pose>(objectName + "_filter", 1);
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = filter_transform_.translation.x;
+    pose.position.y = filter_transform_.translation.y;
+    pose.position.z = filter_transform_.translation.z;
+    pose.orientation.x = filter_transform_.rotation.x;
+    pose.orientation.y = filter_transform_.rotation.y;
+    pose.orientation.z = filter_transform_.rotation.z;
+    pose.orientation.w = filter_transform_.rotation.w;
+    pub_filter_->publish(pose);
   }
   // data_file_ << std::fixed << std::setprecision(6)
   //   << origpose.position.x << ", " << origpose.position.y << ", " << origpose.position.z << ", "
@@ -463,11 +462,15 @@ void MegaPoseClient::spin()
         overlayRender(overlay_img_);
       vpDisplay::displayText(vpI_, 20, 20, "Right click to quit", vpColor::red);
       vpDisplay::displayText(vpI_, 30, 20, "Press t: Toggle overlay", vpColor::red);
-      static vpHomogeneousMatrix M;
-      M = visp_bridge::toVispHomogeneousMatrix(transform_);
-      vpDisplay::displayFrame(vpI_, M, vpcam_info_, 0.05, vpColor::none, 3);
+      static vpHomogeneousMatrix M_original, M_filter;
+      M_original = visp_bridge::toVispHomogeneousMatrix(transform_);
+      vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
       displayScore(confidence_);
       broadcastTransformAndPose(transform_, objectName, camera_tf);
+
+      broadcastTransformAndPose_filter(transform_, objectName);
+      M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
+      vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::green, 3);
     }
     broadcastConfidenceScore(objectName,confidence_,initialized_);
 
