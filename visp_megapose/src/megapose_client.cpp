@@ -2,6 +2,9 @@
 #include "std_msgs/msg/string.hpp"
 #include <string>
 #include <filesystem>  // C++17 filesystem library for checking file existence
+#include <deque>
+#include <fstream>
+#include <sstream>
 
 // visp includes
 #include <visp3/core/vpTime.h>
@@ -13,7 +16,7 @@
 #include <visp_bridge/camera.h>
 #include <visp_bridge/image.h>
 #include <opencv4/opencv2/opencv.hpp>
-#include <cv_bridge/cv_bridge.hpp>
+#include <cv_bridge/cv_bridge.h>
 
 // ROS2 includes
 #include "tf2_ros/transform_broadcaster.h"
@@ -57,11 +60,16 @@ bool fileExists(const std::string &path)
 class MegaPoseClient : public rclcpp::Node
 {
 private:
+  std::ofstream data_file_;
+  std::deque<double> buffer_x, buffer_y, buffer_z,buffer_qw, buffer_qx, buffer_qy, buffer_qz;
+  size_t buffer_size = this->declare_parameter<int>("buffer_size",5);
+  double filt_x = 0.0, filt_y = 0.0, filt_z = 0.0, filt_qw = 0.0, filt_qx = 0.0, filt_qy = 0.0, filt_qz = 0.0;
   image_transport::SubscriberFilter raw_image_subscriber;
   message_filters::Subscriber<sensor_msgs::msg::CameraInfo> camera_info_subscriber;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_detection_allowed;
   rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pub_pose_;
   rclcpp::Publisher<visp_megapose::msg::Confidence>::SharedPtr pub_confidence_;
+  rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pub_filter_;
 
   void frameCallback(const sensor_msgs::msg::Image::ConstSharedPtr &image,
                      const sensor_msgs::msg::CameraInfo::ConstSharedPtr &cam_info);
@@ -79,7 +87,7 @@ private:
   sensor_msgs::msg::Image::ConstSharedPtr rosI_; // Image received from ROS2
   std::string detectionMode;
   std::string detection_allowed_state_ = "not_allowed";
-  double reinitThreshold_;
+  double reinitThreshold_,refilterThreshold_;
   double confidence_;
 
   void waitForImage();
@@ -94,6 +102,8 @@ private:
 
   void broadcastTransformAndPose(const geometry_msgs::msg::Transform &transform, const std::string &child_frame_id, const std::string &camera_tf);
   void broadcastConfidenceScore(const std::string &child_frame_id, float confidence_score, bool initialized_);
+  void filterPose(const geometry_msgs::msg::Pose &origpose, const std::string &objectName);
+  double calculateMovingAverage(const std::deque<double>& buffer);
   geometry_msgs::msg::Transform transform_;
 
   vpColor interpolate(const vpColor &low, const vpColor &high, const float f);
@@ -117,16 +127,21 @@ public:
 MegaPoseClient::MegaPoseClient() : Node("MegaPoseClient")
 {
   reinitThreshold_ = 0.2;
+  refilterThreshold_ = 0.5;
   initialized_ = false;
   got_image_ = false;
   init_request_done_ = true;
   track_request_done_ = true;
   render_request_done_ = true;
   overlayModel_ = true;
+  data_file_.open("filter_.csv");
+  data_file_ << "orig_x, orig_y, orig_z, orig_qw, orig_qx, orig_qy, orig_qz, "
+    << "filt_x, filt_y, filt_z, filt_qw, filt_qx, filt_qy, filt_qz\n";
 }
 MegaPoseClient::~MegaPoseClient()
 {
   RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Shutting down MegaPoseClient");
+  data_file_.close();
   rclcpp::shutdown();
 }
 
@@ -205,6 +220,59 @@ void MegaPoseClient::broadcastTransformAndPose(const geometry_msgs::msg::Transfo
   pose.orientation.z = transform.rotation.z;
   pose.orientation.w = transform.rotation.w;
   pub_pose_->publish(pose);
+  filterPose(pose, objectName);
+}
+void MegaPoseClient::filterPose(const geometry_msgs::msg::Pose &origpose, const std::string &objectName)
+{
+  if(confidence_ > refilterThreshold_)
+  {
+    if (buffer_x.size() >= buffer_size) // Update the buffer with the new pose data
+  {
+    buffer_x.pop_front();
+    buffer_y.pop_front();
+    buffer_z.pop_front();
+    buffer_qw.pop_front();
+    buffer_qx.pop_front();
+    buffer_qy.pop_front();
+    buffer_qz.pop_front();
+  }
+  buffer_x.push_back(origpose.position.x);
+  buffer_y.push_back(origpose.position.y);
+  buffer_z.push_back(origpose.position.z);
+  buffer_qw.push_back(origpose.orientation.w);
+  buffer_qx.push_back(origpose.orientation.x);
+  buffer_qy.push_back(origpose.orientation.y);
+  buffer_qz.push_back(origpose.orientation.z);
+  // Compute the moving average for position and orientation
+  filt_x = calculateMovingAverage(buffer_x);
+  filt_y = calculateMovingAverage(buffer_y);
+  filt_z = calculateMovingAverage(buffer_z);
+  filt_qw = calculateMovingAverage(buffer_qw);
+  filt_qx = calculateMovingAverage(buffer_qx);
+  filt_qy = calculateMovingAverage(buffer_qy);
+  filt_qz = calculateMovingAverage(buffer_qz);
+  // publish target pose
+  static auto pub_filter_ = this->create_publisher<geometry_msgs::msg::Pose>(objectName + "_filter", 1);
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = filt_x;
+  pose.position.y = filt_y;
+  pose.position.z = filt_z;
+  pose.orientation.x = filt_qx;
+  pose.orientation.y = filt_qy;
+  pose.orientation.z = filt_qz;
+  pose.orientation.w = filt_qw;
+  pub_filter_->publish(pose);
+  }
+  data_file_ << std::fixed << std::setprecision(6)
+    << origpose.position.x << ", " << origpose.position.y << ", " << origpose.position.z << ", "
+    << origpose.orientation.w << ", " << origpose.orientation.x << ", " << origpose.orientation.y << ", " << origpose.orientation.z << ", "
+    << filt_x << ", " << filt_y << ", " << filt_z << ", "
+    << filt_qw << ", " << filt_qx << ", " << filt_qy << ", " << filt_qz << "\n";
+}
+double MegaPoseClient::calculateMovingAverage(const std::deque<double>& buffer)
+{
+  if (buffer.size() < 1) return 0.0;  // Avoid division by zero
+  return std::accumulate(buffer.begin(), buffer.end(), 0.0) / buffer.size();
 }
 void MegaPoseClient::broadcastConfidenceScore(const std::string &objectName, float confidence_score, bool detection)
 {
@@ -226,6 +294,7 @@ void MegaPoseClient::spin()
   RCLCPP_INFO(this->get_logger(), "Subscribing to image topic: %s", image_topic.c_str());
   RCLCPP_INFO(this->get_logger(), "Subscribing to camera info topic: %s", camera_info_topic.c_str());
   RCLCPP_INFO(this->get_logger(), "Subscribing to detection allowed topic: %s", detection_allowed_topic.c_str());
+  RCLCPP_INFO(this->get_logger(), "buffer_size: %ld", buffer_size);
 
   std::string detectorMethod = this->declare_parameter<std::string>("detector_method", "DNN");
   RCLCPP_INFO(this->get_logger(), "Detection method: %s", detectorMethod.c_str());
@@ -466,6 +535,17 @@ void MegaPoseClient::initial_pose_service_response_callback(rclcpp::Client<visp_
   init_request_done_ = true;
   transform_ = future.get()->pose;
   confidence_ = future.get()->confidence;
+  if (confidence_ <= refilterThreshold_)
+  {
+    buffer_x.clear();
+    buffer_y.clear();
+    buffer_z.clear();
+    buffer_qw.clear();
+    buffer_qx.clear();
+    buffer_qy.clear();
+    buffer_qz.clear();
+  }
+  
   if (confidence_ < reinitThreshold_)
   {
     RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Initial pose not reliable, reinitializing...");

@@ -1,0 +1,10 @@
+<launch>
+  <node pkg="kalman_filter" exec="average_filter" name="AverageFilter" output="screen">
+	<!-- launch-prefix="gdb -ex  args" --><!-- Debug option -->
+	  <!-- Parameter setting -->
+		<param name="object" value="/cube" /> <!-- 濾波話題 -->
+		<param name="csv_save" value="True" /> <!-- 紀錄CSV True/False -->
+		<param name="confidence_minimum" value="0.7" /><!--megapose信心值低於它停止動作/-->
+		<param name="buffer_size" value="5" /><!--average/-->
+  </node>
+</launch>
