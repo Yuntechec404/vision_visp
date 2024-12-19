@@ -113,9 +113,10 @@ private:
   vpImage<vpRGBa> overlay_img_;
   bool overlayModel_;
 
-  std::optional<vpRect> detectObjectForInitMegaposeDnn(const std::string &detectionLabel);
+  std::optional<vpRect> detectObjectForInitMegaposeDnn(const std::string &detectionLabel, double confidenceThreshold);
   DetectionMethod getDetectionMethodFromString(const std::string &str);
   vpDetectorDNNOpenCV dnn_;
+  int check_wait_time = 0;
 
 public:
   void detectionAllowedCallback(const std_msgs::msg::String::SharedPtr msg);
@@ -400,11 +401,11 @@ void MegaPoseClient::spin()
       else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Auto")
       {
         detection_allowed_state_ = "allowed";
-        detection = detectObjectForInitMegaposeDnn(objectName);
+        detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
       }
       else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Manual" && detection_allowed_state_ == "allowed")
       {
-        detection = detectObjectForInitMegaposeDnn(objectName);
+        detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
       }
 
       if (detection && init_request_done_)
@@ -489,7 +490,7 @@ void MegaPoseClient::spin()
 
   delete d;
 }
-
+/*
 std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::string &detectionLabel)
 {
   cv::Mat I = cv_bridge::toCvCopy(rosI_, rosI_->encoding)->image;
@@ -533,6 +534,59 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
 
   return std::nullopt;
 }
+*/
+std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::string &detectionLabel, double confidenceThreshold)
+{
+  cv::Mat I = cv_bridge::toCvCopy(rosI_, rosI_->encoding)->image;
+  std::vector<vpDetectorDNNOpenCV::DetectedFeatures2D> detections_vec;
+  dnn_.detect(I, detections_vec);
+
+  std::vector<vpDetectorDNNOpenCV::DetectedFeatures2D> matchingDetections;
+  for (const auto &detection : detections_vec)
+  {
+    std::optional<std::string> classnameOpt = detection.getClassName();
+    if (classnameOpt && *classnameOpt == detectionLabel)
+    {
+      if (detection.getConfidenceScore() > confidenceThreshold)
+      {
+        matchingDetections.push_back(detection);
+      }
+    }
+  }
+
+  if (matchingDetections.empty()) 
+  {
+    check_wait_time = 0;
+    return std::nullopt;
+  }
+  
+  check_wait_time ++;
+  if (check_wait_time <= 10)
+  {
+    return std::nullopt;
+  }
+  
+  if(matchingDetections.size() == 1)
+  {
+    check_wait_time = 0;
+    return matchingDetections[0].getBoundingBox();
+  }
+
+  // 如果有多個目標，優先選擇靠下的目標
+  auto bestDetection = std::max_element(
+    matchingDetections.begin(),
+    matchingDetections.end(),
+    [](const vpDetectorDNNOpenCV::DetectedFeatures2D &a, const vpDetectorDNNOpenCV::DetectedFeatures2D &b) {
+      const vpRect bboxA = a.getBoundingBox();
+      const vpRect bboxB = b.getBoundingBox();
+      double bottomA = bboxA.getTop() + bboxA.getHeight();
+      double bottomB = bboxB.getTop() + bboxB.getHeight();
+      return bottomA < bottomB;
+    });
+  check_wait_time = 0;
+  return bestDetection->getBoundingBox();
+}
+
 void MegaPoseClient::initial_pose_service_response_callback(rclcpp::Client<visp_megapose::srv::Init>::SharedFuture future)
 {
   init_request_done_ = true;

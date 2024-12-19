@@ -66,7 +66,7 @@ install(
 )
 install(PROGRAMS
   scripts/megapose_server_.py
-  scripts/crop_image.py
+  scripts/image_process.py
   DESTINATION lib/${PROJECT_NAME}
 )
 install(
