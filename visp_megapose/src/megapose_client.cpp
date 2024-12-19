@@ -16,7 +16,7 @@
 #include <visp_bridge/camera.h>
 #include <visp_bridge/image.h>
 #include <opencv4/opencv2/opencv.hpp>
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 
 // ROS2 includes
 #include "tf2_ros/transform_broadcaster.h"
