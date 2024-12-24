@@ -47,8 +47,7 @@ enum DetectionMethod
   DNN
 };
 
-class Detection_allowed{
-public:
+struct Detection_allowed {
   bool detection_allowed;
   float layer;
 };
@@ -398,7 +397,7 @@ void MegaPoseClient::spin()
       else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Auto")
       {
         detection_allowed_.detection_allowed = true;
-        detection = detectObjectForInitMegaposeDnn(objectName);
+        detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
       }
       else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Manual" && detection_allowed_.detection_allowed == true)
       {
@@ -578,11 +577,14 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
   auto bestDetection = std::max_element(
     matchingDetections.begin(),
     matchingDetections.end(),
-    [](const vpDetectorDNNOpenCV::DetectedFeatures2D &a, const vpDetectorDNNOpenCV::DetectedFeatures2D &b) {
+    [this](const vpDetectorDNNOpenCV::DetectedFeatures2D &a, const vpDetectorDNNOpenCV::DetectedFeatures2D &b) {
       const vpRect bboxA = a.getBoundingBox();
       const vpRect bboxB = b.getBoundingBox();
       double bottomA = bboxA.getTop() + bboxA.getHeight();
       double bottomB = bboxB.getTop() + bboxB.getHeight();
+      if (detection_allowed_.layer == 2.0) {
+        return bottomA > bottomB; // 優先選擇靠下的目標
+      }
       return bottomA < bottomB;
     });
   check_wait_time = 0;
