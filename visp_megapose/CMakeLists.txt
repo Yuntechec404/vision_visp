@@ -31,6 +31,8 @@ find_package(tf2 REQUIRED)
 find_package(VISP REQUIRED COMPONENTS visp_core visp_detection dnn_tracker gui io)
 find_package(rclpy REQUIRED)
 find_package(cv_bridge REQUIRED)
+find_package(visual_servoing REQUIRED)
+
 # service message
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/Init.srv"
@@ -54,6 +56,7 @@ ament_target_dependencies(megapose_client
  VISP
  image_transport
  cv_bridge
+ visual_servoing
 )
 rosidl_get_typesupport_target(cpp_typesupport_target
   ${PROJECT_NAME} rosidl_typesupport_cpp)
