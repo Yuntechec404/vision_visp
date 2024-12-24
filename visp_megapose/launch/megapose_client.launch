@@ -13,13 +13,13 @@
     <!-- set the DNN detector detect object name -->
     <param name="object_name" value="cube"/>
     <!-- set the Render Object Service Enable (True or False) -->
-    <param name="render_enable" value="False"/>
+    <param name="render_enable" value="True"/>
     <!-- set the UI Enable (True or False) -->
     <param name="UI_enable" value="True"/>
     <!-- set the detection mode (Auto:real-time detection or Manual:Waiting for flag signal to start detection) -->
     <param name="detection_mode" value="Auto"/>
     <!-- set the detection allowed topic (detection_mode == "Manual": /shelf_detection_allowed or /pallet_detection_allowed) -->
-    <param name="detection_allowed_topic" value="/shelf_detection_allowed"/>
+    <param name="detection_allowed_topic" value="/shelf_detection"/>
     <!-- set the average sample number -->
     <param name="buffer_size" value="5"/>
   </node>

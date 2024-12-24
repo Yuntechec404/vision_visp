@@ -286,7 +286,7 @@ void MegaPoseClient::spin()
   std::string image_topic = this->declare_parameter<std::string>("image_topic", "/camera/camera/color/image_raw");
   std::string camera_info_topic = this->declare_parameter<std::string>("camera_info_topic", "/camera/camera/color/camera_info");
   std::string camera_tf = this->declare_parameter<std::string>("camera_tf", "camera_color_optical_frame");
-  std::string detection_allowed_topic = this->declare_parameter<std::string>("detection_allowed_topic", "/shelf_detection_allowed");
+  std::string detection_allowed_topic = this->declare_parameter<std::string>("detection_allowed_topic", "/shelf_detection");
   RCLCPP_INFO(this->get_logger(), "Subscribing to image topic: %s", image_topic.c_str());
   RCLCPP_INFO(this->get_logger(), "Subscribing to camera info topic: %s", camera_info_topic.c_str());
   RCLCPP_INFO(this->get_logger(), "Subscribing to detection allowed topic: %s", detection_allowed_topic.c_str());
