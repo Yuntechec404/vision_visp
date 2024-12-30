@@ -1,77 +1,41 @@
-#!/usr/bin/env python3
-import rclpy
-from rclpy.node import Node
+#!/usr/bin/env python
+import rospy
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
 import cv2
 
-class ImageCropperNode(Node):
+class ImageCropperNode:
     def __init__(self):
-        super().__init__('image_cropper_node')
+        # 初始化 ROS 節點
+        rospy.init_node('image_cropper_node', anonymous=True)
         self.bridge = CvBridge()
 
-        self.image_subscription = self.create_subscription(Image,'/camera/camera/color/image_raw',self.image_callback,10)
+        # 訂閱影像和相機資訊
+        self.image_subscription = rospy.Subscriber(
+            '/camera/camera/color/image_raw', Image, self.image_callback)
+        self.info_subscription = rospy.Subscriber(
+            '/camera/camera/color/camera_info', CameraInfo, self.info_callback)
 
-        self.info_subscription = self.create_subscription(CameraInfo,'/camera/camera/color/camera_info',self.info_callback,10)
-
-        self.image_publisher = self.create_publisher(Image,'/camera/color/image_cropped_raw',10)
-
-        self.info_publisher = self.create_publisher(CameraInfo,'/camera/color/image_cropped_info',10)
+        # 發佈處理後的影像和相機資訊
+        self.image_publisher = rospy.Publisher(
+            '/camera/color/image_cropped_raw', Image, queue_size=10)
+        self.info_publisher = rospy.Publisher(
+            '/camera/color/image_cropped_info', CameraInfo, queue_size=10)
 
         self.camera_info = None
 
-        self.get_logger().info("ImageCropperNode has started.")
+        rospy.loginfo("ImageCropperNode has started.")
 
     def info_callback(self, msg):
         self.camera_info = msg
 
-    def image_callback_1(self, msg):
-        try:
-            if self.camera_info is None:
-                self.get_logger().warn("Waiting for CameraInfo message...")
-                return
-
-            # 轉換 ROS2 的 Image 訊息到 OpenCV 映像
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
-
-            # Convert to RGBA format
-            cv_image_rgba = cv2.cvtColor(cv_image, cv2.COLOR_RGB2RGBA)
-
-            # 取得影像高度和寬度
-            height, width, _ = cv_image.shape
-
-            # 裁切下半部分
-            cropped_image = cv_image[height // 2:, :, :]
-            
-            # 轉換裁切後的影像為 ROS2 Image 訊息
-            cropped_msg = self.bridge.cv2_to_imgmsg(cropped_image, encoding='rgb8')
-            cropped_msg.header.stamp = msg.header.stamp
-            cropped_msg.header.frame_id = msg.header.frame_id
-
-            # 發布裁切後的影像
-            self.image_publisher.publish(cropped_msg)
-
-            # 調整 CameraInfo
-            cropped_camera_info = self.adjust_camera_info(self.camera_info, height // 2)
-            cropped_camera_info.header.stamp = msg.header.stamp
-            cropped_camera_info.header.frame_id = msg.header.frame_id
-
-            # 發布裁切後的 CameraInfo
-            self.info_publisher.publish(cropped_camera_info)
-
-            self.get_logger().info(f"Published image and CameraInfo with size: {cv_image.shape}")
-            self.get_logger().info(f"Published cropped image and CameraInfo with size: {cropped_image.shape}")
-
-        except Exception as e:
-            self.get_logger().error(f"Failed to process image: {e}")
-
     def image_callback(self, msg):
         try:
             if self.camera_info is None:
-                self.get_logger().warn("Waiting for CameraInfo message...")
+                rospy.logwarn("Waiting for CameraInfo message...")
                 return
 
-            # 轉換 ROS2 的 Image 訊息到 OpenCV 映像
+            # 轉換 ROS 的 Image 訊息到 OpenCV 映像
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
 
             # 取得影像高度和寬度
@@ -80,7 +44,7 @@ class ImageCropperNode(Node):
             # 將上半部塗黑（填充零）
             cv_image[:height // 2, :, :] = 0
 
-            # 轉換處理後的影像為 ROS2 Image 訊息
+            # 轉換處理後的影像為 ROS Image 訊息
             blacked_out_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding='rgb8')
             blacked_out_msg.header.stamp = msg.header.stamp
             blacked_out_msg.header.frame_id = msg.header.frame_id
@@ -91,10 +55,10 @@ class ImageCropperNode(Node):
             # CameraInfo 不需要調整，因為尺寸不變
             self.info_publisher.publish(self.camera_info)
 
-            self.get_logger().info(f"Published processed image with blacked-out upper half.")
+            rospy.loginfo("Published processed image with blacked-out upper half.")
 
         except Exception as e:
-            self.get_logger().error(f"Failed to process image: {e}")
+            rospy.logerr(f"Failed to process image: {e}")
 
     def adjust_camera_info(self, camera_info, offset):
         """
@@ -115,16 +79,12 @@ class ImageCropperNode(Node):
 
         return cropped_info
 
-def main(args=None):
-    rclpy.init(args=args)
+def main():
     node = ImageCropperNode()
     try:
-        rclpy.spin(node)
+        rospy.spin()
     except KeyboardInterrupt:
-        node.get_logger().info("Shutting down ImageCropperNode.")
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        rospy.loginfo("Shutting down ImageCropperNode.")
 
 if __name__ == '__main__':
     main()
