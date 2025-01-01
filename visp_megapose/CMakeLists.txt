@@ -14,13 +14,34 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
   visp_bridge
   cv_bridge
-  # visual_servoing
+  rospy
+  message_generation
 )
 
-find_package(VISP REQUIRED COMPONENTS visp_core visp_detection dnn_tracker gui io)
+# Define message files
+add_message_files(
+  FILES
+  Confidence.msg
+)
+
+# Define service files
+add_service_files(
+  FILES
+  Init.srv
+  Render.srv
+  Track.srv
+)
+
+# After defining message and service files, call generate_messages
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+  sensor_msgs  # Add sensor_msgs as a dependency
+)
+
+find_package(VISP REQUIRED COMPONENTS visp_core visp_detection gui io)
 
 catkin_package(
-  INCLUDE_DIRS include
   LIBRARIES ${PROJECT_NAME}
   CATKIN_DEPENDS 
   geometry_msgs 
@@ -33,32 +54,18 @@ catkin_package(
   tf2 
   visp_bridge 
   cv_bridge 
-  # visual_servoing
   DEPENDS VISP
-)
-
-include_directories(
-  include
-  ${catkin_INCLUDE_DIRS}
-  ${VISP_INCLUDE_DIRS}
 )
 
 add_definitions("-DBOOST_ALLOW_DEPRECATED_HEADERS")
 add_definitions("-DBOOST_BIND_GLOBAL_PLACEHOLDERS")
 
-# Build the executable
-# add_executable(megapose_client src/megapose_client.cpp)
-# target_link_libraries(megapose_client ${catkin_LIBRARIES} ${VISP_LIBRARIES})
-# add_dependencies(megapose_client ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-# Install targets and scripts
-# install(TARGETS megapose_client
-#   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
-
+# Install Python scripts
 catkin_install_python(PROGRAMS
+  scripts/megapose_server_2.py
   scripts/megapose_server_.py
   scripts/image_process.py
+  scripts/test.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
