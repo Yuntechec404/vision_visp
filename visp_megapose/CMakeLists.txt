@@ -62,9 +62,7 @@ add_definitions("-DBOOST_BIND_GLOBAL_PLACEHOLDERS")
 
 # Install Python scripts
 catkin_install_python(PROGRAMS
-  scripts/megapose_server_2.py
   scripts/megapose_server_.py
-  scripts/image_process.py
   scripts/test.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
@@ -75,4 +73,9 @@ install(DIRECTORY launch/
 
 install(DIRECTORY data/
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/data
+)
+
+install(FILES 
+  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/megapose_variables_final.json
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/scripts
 )
