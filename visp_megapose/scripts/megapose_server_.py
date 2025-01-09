@@ -12,7 +12,8 @@ import megapose_server
 # Set megapose environment variables
 sys.path.append('/home/user/anaconda3/envs/megapose/lib/python3.8/site-packages')
 megapose_server_install_dir = os.path.dirname(megapose_server.__file__)
-variables_file = os.path.join(megapose_server_install_dir, 'megapose_variables_final.json')
+# variables_file = os.path.join(megapose_server_install_dir, 'megapose_variables_final.json')
+variables_file = '/home/user/catkin_ws/src/vision_visp/visp_megapose/scripts/megapose_variables_final.json'
 with open(variables_file, 'r') as f:
     json_vars = json.load(f)
     print('Loaded megapose variables', json_vars)

@@ -70,7 +70,9 @@ namespace visp_bridge{
     vpQuaternionVector q(pose.orientation.x,pose.orientation.y,pose.orientation.z,pose.orientation.w);
 
 #if VISP_VERSION_INT > VP_VERSION_INT(3,6,0)
-    mat.build(vec,q);
+    // mat.build(vec,q);
+    mat.insert(q);   // 插入旋轉矩陣
+    mat.insert(vec); // 插入位移向量
 #else
     mat.buildFrom(vec,q);
 #endif
@@ -83,7 +85,9 @@ namespace visp_bridge{
      vpTranslationVector vec(trans.translation.x,trans.translation.y,trans.translation.z);
      vpQuaternionVector q(trans.rotation.x,trans.rotation.y,trans.rotation.z,trans.rotation.w);
 #if VISP_VERSION_INT > VP_VERSION_INT(3,6,0)
-     mat.build(vec,q);
+    //  mat.build(vec,q);
+    mat.insert(q);   // 插入旋轉矩陣
+    mat.insert(vec); // 插入位移向量
 #else
      mat.buildFrom(vec,q);
 #endif
@@ -156,7 +160,9 @@ namespace visp_bridge{
       rmat[2][2] = a*a-b*b-c*c+d*d;
 
 #if VISP_VERSION_INT > VP_VERSION_INT(3,6,0)
-      mat.build(vec,rmat);
+      // mat.build(vec,rmat);
+      mat.insert(q);   // 插入旋轉矩陣
+      mat.insert(vec); // 插入位移向量
 #else
       mat.buildFrom(vec,rmat);
 #endif
@@ -205,7 +211,9 @@ namespace visp_bridge{
       rmat[2][2] = a*a-b*b-c*c+d*d;
 
 #if VISP_VERSION_INT > VP_VERSION_INT(3,6,0)
-      mat.build(vec,rmat);
+      // mat.build(vec,rmat);
+      mat.insert(q);   // 插入旋轉矩陣
+      mat.insert(vec); // 插入位移向量
 #else
       mat.buildFrom(vec,rmat);
 #endif
