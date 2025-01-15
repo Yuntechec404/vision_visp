@@ -21,15 +21,13 @@
   <build_depend>std_msgs</build_depend>
   <build_depend>image_transport</build_depend>
   <build_depend>roscpp</build_depend>
-  <build_depend>tf2_ros</build_depend>
-  <build_depend>tf2</build_depend>
   <build_depend>visp</build_depend>
   <build_depend>visp3</build_depend>
   <build_depend>visp_bridge</build_depend>
   <build_depend>cv_bridge</build_depend>
   <build_depend>message_generation</build_depend>
   <build_depend>visual_servoing</build_depend>
-
+  
   <!-- Runtime dependencies -->
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>message_filters</exec_depend>
@@ -37,8 +35,6 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>image_transport</exec_depend>
   <exec_depend>roscpp</exec_depend>
-  <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>tf2</exec_depend>
   <exec_depend>visp</exec_depend>
   <exec_depend>visp3</exec_depend>
   <exec_depend>visp_bridge</exec_depend>

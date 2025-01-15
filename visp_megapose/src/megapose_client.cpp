@@ -2,7 +2,7 @@
 #include <geometry_msgs/Vector3.h>
 #include <geometry_msgs/Transform.h>
 #include <iostream>
-
+#include <numeric>
 
 #include <ros/ros.h>
 #include <deque>
@@ -11,9 +11,14 @@
 #include <opencv2/opencv.hpp>
 
 // ViSP includes
-#include <visp3/core/vpTime.h>
+// #include <visp3/core/vpTime.h>
+// #include <visp3/gui/vpDisplayX.h>
+// #include <visp3/detection/vpDetectorDNNOpenCV.h>
+#include <visp3/core/vpImage.h>
+#include <visp3/gui/vpDisplayGDI.h>
+#include <visp3/gui/vpDisplayOpenCV.h>
 #include <visp3/gui/vpDisplayX.h>
-#include <visp3/detection/vpDetectorDNNOpenCV.h>
+#include <visp3/io/vpImageIo.h>
 
 // OpenCV/ViSP bridge includes
 #include <visp_bridge/3dpose.h>
@@ -32,6 +37,7 @@
 // ROS 1 message filters
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
+#include <message_filters/time_synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
 
 // ROS 1 custom messages and services
@@ -49,7 +55,7 @@ enum DetectionMethod
   DNN
 };
 
-struct Detection_allowed
+struct DetectionAllowed
 {
   bool detection_allowed;
   float layer;
@@ -68,37 +74,639 @@ bool fileExists(const std::string &path)
 
 class MegaPoseClient
 {
+private:
+  ros::NodeHandle* nh_;
+  ros::NodeHandle* priv_nh_;
+  ros::Subscriber detection_allowed_sub_;
+  message_filters::Subscriber<sensor_msgs::Image> image_sub_;
+  message_filters::Subscriber<sensor_msgs::CameraInfo> camera_info_sub_;
+  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::CameraInfo> SyncPolicy;
+  message_filters::Synchronizer<SyncPolicy> sync_;
+
+  DetectionAllowed detection_allowed_;
+  bool got_image_;
+
+  std::string image_topic;
+  std::string camera_info_topic;
+  std::string camera_tf;
+  std::string detectorMethod;
+  std::string detectorModelPath;
+  std::string objectName;
+  bool renderEnable;
+  bool UIEnable;
+  std::string detectionMode;
+  std::string detection_allowed_topic;
+  int buffer_size;
+
+  double reinitThreshold_,refilterThreshold_;
+  double confidence_;
+  sensor_msgs::CameraInfoConstPtr roscam_info_;
+  vpImage<vpRGBa> vpI_;                          // Image used for debug display
+  boost::shared_ptr<const sensor_msgs::Image> rosI_; // ROS 1使用的图像指针类型
+  std::deque<double> buffer_x, buffer_y, buffer_z,buffer_qw, buffer_qx, buffer_qy, buffer_qz;
+  double filt_x = 0.0, filt_y = 0.0, filt_z = 0.0, filt_qw = 0.0, filt_qx = 0.0, filt_qy = 0.0, filt_qz = 0.0;
+
+  vpImage<vpRGBa> visp_image_;
+  vpCameraParameters camera_params_;
+  geometry_msgs::Transform transform_,filter_transform_;
+  unsigned width_, height_;
+
+  void initial_pose_service_response_callback(const visp_megapose::Init::Response& future);
+  bool initialized_;
+  bool init_request_done_;
+  void track_pose_service_response_callback(const visp_megapose::Track::Response& future);
+  bool track_request_done_;
+  void render_service_response_callback(const visp_megapose::Render::Response& future);
+  bool render_request_done_;
+  float confidence_score;
+  bool overlayModel_;
+  
+  void init_parameter();
+  void waitForImage();
+  void detectionAllowedCallback(const visual_servoing::Detection &msg);
+  void frameCallback(const sensor_msgs::ImageConstPtr &image, const sensor_msgs::CameraInfoConstPtr &camera_info);
+  void overlayRender(const vpImage<vpRGBa> &overlay);
+  DetectionMethod getDetectionMethodFromString(const std::string &str);
+  void broadcastTransformAndPose(const geometry_msgs::Transform &transform, const std::string &objectName, const std::string &camera_tf);
+  void broadcastTransformAndPose_filter(const geometry_msgs::Transform &origpose, const std::string &objectName);
+  double calculateMovingAverage(const std::deque<double>& buffer);
+  void broadcastConfidenceScore(const std::string &child_frame_id, float confidence_score, bool initialized_);
+  vpColor interpolate(const vpColor &low, const vpColor &high, const float f);
+  void displayScore(float);
+  std::optional<vpRect> detectObjectForInitMegaposeClick();
+  vpImage<vpRGBa> overlay_img_;
+  vpCameraParameters vpcam_info_;
+  int check_wait_time = 0;
 public:
-  MegaPoseClient();
+  explicit MegaPoseClient(ros::NodeHandle* nh, ros::NodeHandle* priv_nh);
   ~MegaPoseClient();
   void spin();
 };
 
-MegaPoseClient::MegaPoseClient()
+MegaPoseClient::MegaPoseClient(ros::NodeHandle* nh, ros::NodeHandle* priv_nh)
+    : nh_(nh), priv_nh_(priv_nh),
+      sync_(SyncPolicy(1), image_sub_, camera_info_sub_)
 {
-  ROS_INFO("MegaPoseClient initialized!");
+  init_parameter();
+  image_sub_.subscribe(*nh_, image_topic, 1);
+  camera_info_sub_.subscribe(*nh_, camera_info_topic, 1);
+  reinitThreshold_ = 0.2;
+  refilterThreshold_ = 0.5;
+  initialized_ = false;
+  got_image_ = false;
+  init_request_done_ = true;
+  track_request_done_ = true;
+  render_request_done_ = true;
+  overlayModel_ = true;
+  
+  // 訂閱主題
+  detection_allowed_sub_ = nh_->subscribe(detection_allowed_topic, 1, &MegaPoseClient::detectionAllowedCallback, this);
+  sync_.registerCallback(boost::bind(&MegaPoseClient::frameCallback, this, _1, _2));
+
+  ROS_INFO("MegaPoseClient initialized.");
 }
 
 MegaPoseClient::~MegaPoseClient()
 {
   ROS_INFO("Shutting down MegaPoseClient");
+  // data_file_.close();
   ros::shutdown();
+}
+
+DetectionMethod MegaPoseClient::getDetectionMethodFromString(const std::string &str)
+{
+  if (stringToDetectionMethod.find(str) != stringToDetectionMethod.end())
+  {
+    return stringToDetectionMethod[str];
+  }
+  return UNKNOWN; // Default case if string is not found
+};
+
+void MegaPoseClient::init_parameter()
+{
+  priv_nh_->param<std::string>("image_topic", image_topic, "/camera/image_raw");
+  priv_nh_->param<std::string>("camera_info_topic", camera_info_topic, "/camera/camera_info");
+  priv_nh_->param<std::string>("camera_tf", camera_tf, "camera_color_optical_frame");
+  priv_nh_->param<std::string>("detector_method", detectorMethod, "DNN");
+  priv_nh_->param<std::string>("detector_model_path", detectorModelPath, "none");
+  priv_nh_->param<std::string>("object_name", objectName, "cube");
+  priv_nh_->param<bool>("render_enable", renderEnable, true);
+  priv_nh_->param<bool>("UI_enable", UIEnable, true);
+  priv_nh_->param<std::string>("detection_mode", detectionMode, "Auto");
+  priv_nh_->param<std::string>("detection_allowed_topic", detection_allowed_topic, "/shelf_detection");
+  priv_nh_->param<int>("buffer_size", buffer_size, 5);
+
+  ROS_INFO("=== Parameters Loaded ===");
+  ROS_INFO("Image topic: %s", image_topic.c_str());
+  ROS_INFO("Camera info topic: %s", camera_info_topic.c_str());
+  ROS_INFO("Camera TF: %s", camera_tf.c_str());
+  ROS_INFO("Detector method: %s", detectorMethod.c_str());
+  ROS_INFO("Detector model path: %s", detectorModelPath.c_str());
+  ROS_INFO("Object name: %s", objectName.c_str());
+  ROS_INFO("Render enable: %s", renderEnable ? "True" : "False");
+  ROS_INFO("UI enable: %s", UIEnable ? "True" : "False");
+  ROS_INFO("Detection mode: %s", detectionMode.c_str());
+  ROS_INFO("Detection allowed topic: %s", detection_allowed_topic.c_str());
+  ROS_INFO("Buffer size: %d", buffer_size);
+}
+
+void MegaPoseClient::waitForImage()
+{
+  ros::Rate loop_rate(10);
+  ROS_INFO("Waiting for a rectified image...");
+  while (ros::ok())
+  {
+    if (got_image_)
+    {
+      ROS_INFO("Got image!");
+      return;
+    }
+    ros::spinOnce();
+    loop_rate.sleep();
+  }
+}
+
+void MegaPoseClient::frameCallback(const sensor_msgs::ImageConstPtr &image,
+                                   const sensor_msgs::CameraInfoConstPtr &cam_info)
+{
+  rosI_ = image;
+  roscam_info_ = cam_info;
+  width_ = image->width;
+  height_ = image->height;
+  try
+  {
+    // 將 ROS 影像轉為 ViSP 格式
+    vpI_ = visp_bridge::toVispImageRGBa(*image);
+    // 將相機資訊轉為 ViSP 格式
+    vpcam_info_ = visp_bridge::toVispCameraParameters(*cam_info);
+    if (UIEnable)
+    {
+      vpDisplayX display(vpI_);
+      vpDisplay::display(vpI_);
+      vpDisplay::flush(vpI_);
+    }
+    got_image_ = true;
+    // ROS_INFO("Image and camera info received.");
+  }
+  catch (const std::exception &e)
+  {
+    ROS_ERROR("Error processing image and camera info: %s", e.what());
+  }
+}
+
+void MegaPoseClient::detectionAllowedCallback(const visual_servoing::Detection &msg)
+{
+  detection_allowed_.detection_allowed = msg.detection_allowed;
+  detection_allowed_.layer = msg.layer;
+}
+
+void MegaPoseClient::broadcastTransformAndPose(const geometry_msgs::Transform &transform, const std::string &objectName, const std::string &camera_tf)
+{
+  // broadcast transform
+
+  static geometry_msgs::TransformStamped transformStamped;
+  static tf::TransformBroadcaster tf_broadcaster_;
+
+  transformStamped.header.stamp = ros::Time::now();
+  transformStamped.header.frame_id = camera_tf;
+  transformStamped.child_frame_id = objectName;
+  transformStamped.transform = transform;
+  tf_broadcaster_.sendTransform(transformStamped);
+  // publish target pose
+  static ros::Publisher pub_pose_ = nh_->advertise<geometry_msgs::Pose>(objectName, 1);
+  // static auto pub_pose_ = this->create_publisher<geometry_msgs::Pose>(objectName, 1);
+  geometry_msgs::Pose pose;
+  pose.position.x = transform.translation.x;
+  pose.position.y = transform.translation.y;
+  pose.position.z = transform.translation.z;
+  pose.orientation.x = transform.rotation.x;
+  pose.orientation.y = transform.rotation.y;
+  pose.orientation.z = transform.rotation.z;
+  pose.orientation.w = transform.rotation.w;
+  pub_pose_.publish(pose);
+}
+
+void MegaPoseClient::broadcastTransformAndPose_filter(const geometry_msgs::Transform &origpose, const std::string &objectName)
+{
+  if(confidence_ > refilterThreshold_)
+  {
+    if (boost::numeric_cast<int>(buffer_x.size()) >= buffer_size)
+    {
+      buffer_x.pop_front();
+      buffer_y.pop_front();
+      buffer_z.pop_front();
+      buffer_qw.pop_front();
+      buffer_qx.pop_front();
+      buffer_qy.pop_front();
+      buffer_qz.pop_front();
+    }
+    buffer_x.push_back(origpose.translation.x);
+    buffer_y.push_back(origpose.translation.y);
+    buffer_z.push_back(origpose.translation.z);
+    buffer_qw.push_back(origpose.rotation.w);
+    buffer_qx.push_back(origpose.rotation.x);
+    buffer_qy.push_back(origpose.rotation.y);
+    buffer_qz.push_back(origpose.rotation.z);
+
+    filter_transform_.translation.x = calculateMovingAverage(buffer_x);
+    filter_transform_.translation.y = calculateMovingAverage(buffer_y);
+    filter_transform_.translation.z = calculateMovingAverage(buffer_z);
+    filter_transform_.rotation.w = calculateMovingAverage(buffer_qw);
+    filter_transform_.rotation.x = calculateMovingAverage(buffer_qx);
+    filter_transform_.rotation.y = calculateMovingAverage(buffer_qy);
+    filter_transform_.rotation.z = calculateMovingAverage(buffer_qz);
+
+    static ros::Publisher pub_filter_ = nh_->advertise<geometry_msgs::Pose>(objectName + "_filter", 1);
+    // static auto pub_filter_ = this->create_publisher<geometry_msgs::Pose>(objectName + "_filter", 1);
+    geometry_msgs::Pose pose;
+    pose.position.x = filter_transform_.translation.x;
+    pose.position.y = filter_transform_.translation.y;
+    pose.position.z = filter_transform_.translation.z;
+    pose.orientation.x = filter_transform_.rotation.x;
+    pose.orientation.y = filter_transform_.rotation.y;
+    pose.orientation.z = filter_transform_.rotation.z;
+    pose.orientation.w = filter_transform_.rotation.w;
+    pub_filter_.publish(pose);
+  }
+  // data_file_ << std::fixed << std::setprecision(6)
+  //   << origpose.position.x << ", " << origpose.position.y << ", " << origpose.position.z << ", "
+  //   << origpose.orientation.w << ", " << origpose.orientation.x << ", " << origpose.orientation.y << ", " << origpose.orientation.z << ", "
+  //   << filt_x << ", " << filt_y << ", " << filt_z << ", "
+  //   << filt_qw << ", " << filt_qx << ", " << filt_qy << ", " << filt_qz << "\n";
+}
+
+double MegaPoseClient::calculateMovingAverage(const std::deque<double>& buffer)
+{
+  if (buffer.size() < 1) return 0.0;  // Avoid division by zero
+  return std::accumulate(buffer.begin(), buffer.end(), 0.0) / buffer.size();
+}
+
+void MegaPoseClient::broadcastConfidenceScore(const std::string &objectName, float confidence_score, bool detection)
+{
+  // publish confidence score
+  static ros::Publisher pub_confidence_ = nh_->advertise<visp_megapose::Confidence>(objectName + "_confidence", 1);
+  // static auto pub_confidence_ = this->create_publisher<visp_megapose::msg::Confidence>(objectName + "_confidence", 1);
+  visp_megapose::Confidence confidence_msg;
+  confidence_msg.object_confidence = confidence_score;
+  confidence_msg.model_detection = detection;
+  pub_confidence_.publish(confidence_msg);
 }
 
 void MegaPoseClient::spin()
 {
+  if (getDetectionMethodFromString(detectorMethod) == UNKNOWN)
+  {
+    ROS_ERROR("Unknown detection method. Exiting.");
+    ros::shutdown();
+  }
+
+  if (!fileExists(detectorModelPath))
+  {
+    ROS_ERROR("Detector model path does not exist. Exiting.");
+    ros::shutdown();
+  }
+
+  std::string detectorConfig = "none";
+  std::string detectorFramework = "onnx", detectorTypeString = "yolov7";
+  std::vector<std::string> labels = {objectName};
+
+  // Initialize DNN detector if detectorMethod is DNN
+  if (getDetectionMethodFromString(detectorMethod) == DNN)
+  {
+    
+  }
+
+  vpDisplayX *d = NULL;
+
+  ros::ServiceClient initial_pose_client = nh_->serviceClient<visp_megapose::Init>("initial_pose");
+  ros::ServiceClient track_pose_client = nh_->serviceClient<visp_megapose::Track>("track_pose");
+  ros::ServiceClient render_client = nh_->serviceClient<visp_megapose::Render>("render_object");
+  while (!ros::service::waitForService("initial_pose", ros::Duration(1.0)) &&
+         !ros::service::waitForService("track_pose", ros::Duration(1.0)) &&
+         !ros::service::waitForService("render_object", ros::Duration(1.0)))
+  {
+    if (!ros::ok())
+    {
+      ROS_ERROR("Interrupted while waiting for the service. Exiting.");
+      return;
+    }
+    ROS_INFO("initial_pose service not available, waiting again...");
+  }
+
+  ros::Rate loop_rate(10);
   while (ros::ok())
   {
-    ros::spinOnce(); // 確保回呼函數可以執行
+    vpDisplay::display(vpI_);
+    ros::spinOnce();
+    vpDisplay::displayText(vpI_, 40, 20, "Detection allowed state: " + detection_allowed_.detection_allowed, vpColor::red);
+
+    if (!initialized_)
+    {
+      std::optional<vpRect> detection = std::nullopt;
+
+      if (getDetectionMethodFromString(detectorMethod) == CLICK)
+      {
+        detection = detectObjectForInitMegaposeClick();
+      }
+      else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Auto")
+      {
+        // detection_allowed_.detection_allowed = true;
+        // detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
+      }
+      else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Manual" && detection_allowed_.detection_allowed == true)
+      {
+        // detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
+      }
+
+      if (detection && init_request_done_)
+      {
+        visp_megapose::Init initial_pose_request;
+        visp_megapose::Init::Response initial_pose_response;
+        initial_pose_request.request.object_name = objectName;
+        initial_pose_request.request.topleft_i = detection->getTopLeft().get_i();
+        initial_pose_request.request.topleft_j = detection->getTopLeft().get_j();
+        initial_pose_request.request.bottomright_i = detection->getBottomRight().get_i();
+        initial_pose_request.request.bottomright_j = detection->getBottomRight().get_j();
+        initial_pose_request.request.image = *rosI_;
+        initial_pose_request.request.camera_info = *roscam_info_;
+
+        if (initial_pose_client.call(initial_pose_request))
+        {
+          ROS_INFO("Initial pose service called successfully.");
+          initial_pose_service_response_callback(initial_pose_response);
+          init_request_done_ = false;
+        } 
+        else 
+        {
+          ROS_ERROR("Failed to call initial pose service.");
+        }
+      }
+    }
+    else if (initialized_)
+    {
+      visp_megapose::Track track_pose_request;
+      visp_megapose::Track::Response track_pose_response;
+      if (track_request_done_)
+      {
+        track_pose_request.request.object_name = objectName;
+        track_pose_request.request.init_pose = transform_;
+        track_pose_request.request.refiner_iterations = 1;
+        track_pose_request.request.image = *rosI_;
+        track_pose_request.request.camera_info = *roscam_info_;
+
+        if (track_pose_client.call(track_pose_request)) 
+        {
+          ROS_INFO("Track pose service called successfully.");
+          track_pose_service_response_callback(track_pose_response);
+          track_request_done_ = false;
+        } 
+        else 
+        {
+          ROS_ERROR("Failed to call track pose service.");
+        }
+      }
+      visp_megapose::Render render_request;
+      visp_megapose::Render::Response render_response;
+      if (render_request_done_ && overlayModel_ && renderEnable)
+      {
+        render_request.request.object_name = objectName;
+        render_request.request.pose = transform_;
+        render_request.request.camera_info = *roscam_info_;
+        if (render_client.call(render_request)) 
+        {
+          ROS_INFO("Render service called successfully.");
+          render_service_response_callback(render_response);
+          render_request_done_ = false;
+        } 
+        else 
+        {
+          ROS_ERROR("Failed to call render service.");
+        }
+      }
+
+      std::string keyboardEvent;
+      const bool keyPressed = vpDisplay::getKeyboardEvent(vpI_, keyboardEvent, false);
+      if (keyPressed)
+      {
+        if (keyboardEvent == "t")
+          overlayModel_ = !overlayModel_;
+      }
+      if (overlay_img_.getSize() > 0 && overlayModel_)
+        overlayRender(overlay_img_);
+      vpDisplay::displayText(vpI_, 20, 20, "Right click to quit", vpColor::red);
+      vpDisplay::displayText(vpI_, 30, 20, "Press t: Toggle overlay", vpColor::red);
+      static vpHomogeneousMatrix M_original, M_filter;
+      M_original = visp_bridge::toVispHomogeneousMatrix(transform_);
+      vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
+      displayScore(confidence_);
+      broadcastTransformAndPose(transform_, objectName, camera_tf);
+
+      broadcastTransformAndPose_filter(transform_, objectName);
+      M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
+      vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::green, 3);
+    }
+    broadcastConfidenceScore(objectName,confidence_,initialized_);
+
+    vpDisplay::flush(vpI_);
+    vpMouseButton::vpMouseButtonType button;
+    if (vpDisplay::getClick(vpI_, button, false))
+    {
+      if (button == vpMouseButton::button3)
+      {
+        break; // Right click to stop
+      }
+    }
+
+    loop_rate.sleep();
+  }
+  delete d;
+}
+
+void MegaPoseClient::initial_pose_service_response_callback(const visp_megapose::Init::Response& future)
+{
+  init_request_done_ = true;
+  transform_ = future.pose;
+  confidence_ = future.confidence;
+  if (confidence_ <= refilterThreshold_)
+  {
+    buffer_x.clear();
+    buffer_y.clear();
+    buffer_z.clear();
+    buffer_qw.clear();
+    buffer_qx.clear();
+    buffer_qy.clear();
+    buffer_qz.clear();
+  }
+  
+  if (confidence_ < reinitThreshold_)
+  {
+    ROS_INFO("Initial pose not reliable, reinitializing...");
+  }
+  else
+  {
+    initialized_ = true;
+    ROS_INFO("Initialized successfully!");
+  }
+}
+
+void MegaPoseClient::track_pose_service_response_callback(const visp_megapose::Track::Response& future)
+{
+  track_request_done_ = true;
+  transform_ = future.pose;
+  confidence_ = future.confidence;
+  if (detectionMode == "Manual" && detection_allowed_.detection_allowed == false)
+  {
+    initialized_ = false;
+    ROS_INFO("No tracking allowed, waiting for tracking permission...");
+  }
+  else if (confidence_ < reinitThreshold_)
+  {
+    initialized_ = false;
+    ROS_INFO("Tracking lost, reinitializing...");
+  }
+}
+
+void MegaPoseClient::render_service_response_callback(const visp_megapose::Render::Response& future)
+{
+  render_request_done_ = true;
+  overlay_img_ = visp_bridge::toVispImageRGBa(future.image);
+}
+
+void MegaPoseClient::displayScore(float confidence)
+{
+  const unsigned top = static_cast<unsigned>(vpI_.getHeight() * 0.85f);
+  const unsigned height = static_cast<unsigned>(vpI_.getHeight() * 0.1f);
+  const unsigned left = static_cast<unsigned>(vpI_.getWidth() * 0.05f);
+  const unsigned width = static_cast<unsigned>(vpI_.getWidth() * 0.5f);
+  vpRect full(left, top, width, height);
+  vpRect scoreRect(left, top, width * confidence, height);
+  const vpColor low = vpColor::red;
+  const vpColor high = vpColor::green;
+  const vpColor c = interpolate(low, high, confidence);
+
+  vpDisplay::displayRectangle(vpI_, full, c, false, 5);
+  vpDisplay::displayRectangle(vpI_, scoreRect, c, true, 1);
+}
+
+vpColor MegaPoseClient::interpolate(const vpColor &low, const vpColor &high, const float f)
+{
+  const float r = ((float)high.R - (float)low.R) * f;
+  const float g = ((float)high.G - (float)low.G) * f;
+  const float b = ((float)high.B - (float)low.B) * f;
+  return vpColor((unsigned char)r, (unsigned char)g, (unsigned char)b);
+}
+
+/*
+std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::string &detectionLabel, double confidenceThreshold)
+{
+  cv::Mat I = cv_bridge::toCvCopy(rosI_, rosI_->encoding)->image;
+  std::vector<vpDetectorDNNOpenCV::DetectedFeatures2D> detections_vec;
+  dnn_.detect(I, detections_vec);
+
+  std::vector<vpDetectorDNNOpenCV::DetectedFeatures2D> matchingDetections;
+  for (const auto &detection : detections_vec)
+  {
+    std::optional<std::string> classnameOpt = detection.getClassName();
+    if (classnameOpt && *classnameOpt == detectionLabel)
+    {
+      if (detection.getConfidenceScore() > confidenceThreshold)
+      {
+        matchingDetections.push_back(detection);
+      }
+    }
+  }
+
+  if (matchingDetections.empty()) 
+  {
+    check_wait_time = 0;
+    return std::nullopt;
+  }
+  
+  check_wait_time ++;
+  if (check_wait_time <= 10)
+  {
+    return std::nullopt;
+  }
+  
+  if(matchingDetections.size() == 1)
+  {
+    check_wait_time = 0;
+    return matchingDetections[0].getBoundingBox();
+  }
+
+  // 如果有多個目標，優先選擇靠下的目標
+  auto bestDetection = std::max_element(
+    matchingDetections.begin(),
+    matchingDetections.end(),
+    [this](const vpDetectorDNNOpenCV::DetectedFeatures2D &a, const vpDetectorDNNOpenCV::DetectedFeatures2D &b) {
+      const vpRect bboxA = a.getBoundingBox();
+      const vpRect bboxB = b.getBoundingBox();
+      double bottomA = bboxA.getTop() + bboxA.getHeight();
+      double bottomB = bboxB.getTop() + bboxB.getHeight();
+      if (detection_allowed_.layer == 2.0) {
+        return bottomA > bottomB; // 優先選擇靠下的目標
+      }
+      return bottomA < bottomB;
+    });
+  check_wait_time = 0;
+  return bestDetection->getBoundingBox();
+}
+*/
+
+std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeClick()
+{
+  const bool startLabelling = vpDisplay::getClick(vpI_, false);
+
+  const vpImagePoint textPosition(10.0, 20.0);
+
+  if (startLabelling)
+  {
+    vpImagePoint topLeft, bottomRight;
+    vpDisplay::displayText(vpI_, textPosition, "Click the upper left corner of the bounding box", vpColor::red);
+    vpDisplay::flush(vpI_);
+    vpDisplay::getClick(vpI_, topLeft, true);
+    vpDisplay::display(vpI_);
+    vpDisplay::displayCross(vpI_, topLeft, 5, vpColor::red, 2);
+    vpDisplay::displayText(vpI_, textPosition, "Click the bottom right corner of the bounding box", vpColor::red);
+    vpDisplay::flush(vpI_);
+    vpDisplay::getClick(vpI_, bottomRight, true);
+    vpRect bb(topLeft, bottomRight);
+    return bb;
+  }
+  else
+  {
+    vpDisplay::display(vpI_);
+    vpDisplay::displayText(vpI_, textPosition,
+                           "Click when the object is visible and static to start reinitializing megapose.",
+                           vpColor::red);
+    vpDisplay::flush(vpI_);
+    return std::nullopt;
+  }
+}
+
+void MegaPoseClient::overlayRender(const vpImage<vpRGBa> &overlay)
+{
+  vpRGBa black(0, 0, 0);  // 初始化黑色
+  for (unsigned int i = 0; i < height_; ++i)
+  {
+    for (unsigned int j = 0; j < width_; ++j)
+    {
+      if (const_cast<vpRGBa&>(overlay[i][j]) != black)  // 使用 const_cast 去掉 const
+      {
+        vpI_[i][j] = overlay[i][j];
+      }
+    }
   }
 }
 
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "megapose_client");
-  ros::NodeHandle n;
+  ros::NodeHandle nh;
+  ros::NodeHandle priv_nh("~");
 
-  MegaPoseClient client;
-  client.spin();
+  MegaPoseClient node(&nh, &priv_nh);
+  node.spin();
+
   return 0;
 }

@@ -12,8 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   image_transport
   roscpp
-  tf2_ros
-  tf2
+  tf
   visp_bridge
   cv_bridge
   rospy
@@ -22,11 +21,14 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 ## 設定自編譯 ViSP 的目錄
-set(VISP_DIR /home/user/visp-ws/visp-build)
-set(CMAKE_PREFIX_PATH ${VISP_DIR} ${CMAKE_PREFIX_PATH})
+# set(VISP_DIR /home/user/visp-ws/visp-build)
+# set(CMAKE_PREFIX_PATH ${VISP_DIR} ${CMAKE_PREFIX_PATH})
+
 
 ## 找到 ViSP
+set(OpenCV_DIR "/usr/local/share/OpenCV")
 find_package(VISP REQUIRED)
+find_package(OpenCV REQUIRED)
 
 ## 設定 include 路徑
 include_directories(
@@ -71,8 +73,6 @@ catkin_package(
   std_msgs
   image_transport
   roscpp
-  tf2_ros
-  tf2
   visp_bridge
   cv_bridge
   visual_servoing
@@ -92,6 +92,15 @@ add_dependencies(megapose_client ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EX
 target_link_libraries(megapose_client
   ${catkin_LIBRARIES}
   ${VISP_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
+
+add_executable(image_sync src/image_sync.cpp)
+add_dependencies(image_sync ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(image_sync
+  ${catkin_LIBRARIES}
+  ${VISP_LIBRARIES}
+  ${OpenCV_LIBRARIES}
 )
 
 ## 安裝 Launch 檔案
