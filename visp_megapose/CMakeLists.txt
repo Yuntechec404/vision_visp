@@ -83,6 +83,7 @@ catkin_package(
 catkin_install_python(PROGRAMS
   scripts/megapose_server_.py
   scripts/test.py
+  scripts/ros_pose_hz_to_csv.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
