@@ -70,6 +70,7 @@ install(
 install(PROGRAMS
   scripts/megapose_server_.py
   scripts/image_process.py
+  scripts/ros_pose_hz_to_csv.py
   DESTINATION lib/${PROJECT_NAME}
 )
 install(
