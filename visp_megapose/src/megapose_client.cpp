@@ -1,6 +1,6 @@
-#define ROS_NO_DEPRECATED_API
 #include <geometry_msgs/Vector3.h>
 #include <geometry_msgs/Transform.h>
+#include <tf/transform_datatypes.h>
 #include <iostream>
 #include <numeric>
 
@@ -19,6 +19,7 @@
 #include <visp3/gui/vpDisplayOpenCV.h>
 #include <visp3/gui/vpDisplayX.h>
 #include <visp3/io/vpImageIo.h>
+#include <visp/vpHomogeneousMatrix.h>
 
 // OpenCV/ViSP bridge includes
 #include <visp_bridge/3dpose.h>
@@ -102,12 +103,10 @@ private:
   double confidence_;
   sensor_msgs::CameraInfoConstPtr roscam_info_;
   vpImage<vpRGBa> vpI_;                          // Image used for debug display
-  boost::shared_ptr<const sensor_msgs::Image> rosI_; // ROS 1使用的图像指针类型
+  boost::shared_ptr<const sensor_msgs::Image> rosI_; // ROS 1
   std::deque<double> buffer_x, buffer_y, buffer_z,buffer_qw, buffer_qx, buffer_qy, buffer_qz;
   double filt_x = 0.0, filt_y = 0.0, filt_z = 0.0, filt_qw = 0.0, filt_qx = 0.0, filt_qy = 0.0, filt_qz = 0.0;
 
-  vpImage<vpRGBa> visp_image_;
-  vpCameraParameters camera_params_;
   geometry_msgs::Transform transform_,filter_transform_;
   unsigned width_, height_;
 
@@ -133,6 +132,7 @@ private:
   void broadcastConfidenceScore(const std::string &child_frame_id, float confidence_score, bool initialized_);
   vpColor interpolate(const vpColor &low, const vpColor &high, const float f);
   void displayScore(float);
+  void transformToVispHomogeneousMatrix(const geometry_msgs::Transform& transform, vpHomogeneousMatrix &M);
   std::optional<vpRect> detectObjectForInitMegaposeClick();
   vpImage<vpRGBa> overlay_img_;
   vpCameraParameters vpcam_info_;
@@ -233,25 +233,12 @@ void MegaPoseClient::frameCallback(const sensor_msgs::ImageConstPtr &image,
   roscam_info_ = cam_info;
   width_ = image->width;
   height_ = image->height;
-  try
+  if(UIEnable)
   {
-    // 將 ROS 影像轉為 ViSP 格式
     vpI_ = visp_bridge::toVispImageRGBa(*image);
-    // 將相機資訊轉為 ViSP 格式
     vpcam_info_ = visp_bridge::toVispCameraParameters(*cam_info);
-    if (UIEnable)
-    {
-      vpDisplayX display(vpI_);
-      vpDisplay::display(vpI_);
-      vpDisplay::flush(vpI_);
-    }
-    got_image_ = true;
-    // ROS_INFO("Image and camera info received.");
   }
-  catch (const std::exception &e)
-  {
-    ROS_ERROR("Error processing image and camera info: %s", e.what());
-  }
+  got_image_ = true;
 }
 
 void MegaPoseClient::detectionAllowedCallback(const visual_servoing::Detection &msg)
@@ -370,6 +357,7 @@ void MegaPoseClient::spin()
   std::string detectorFramework = "onnx", detectorTypeString = "yolov7";
   std::vector<std::string> labels = {objectName};
 
+  waitForImage();
   // Initialize DNN detector if detectorMethod is DNN
   if (getDetectionMethodFromString(detectorMethod) == DNN)
   {
@@ -377,6 +365,13 @@ void MegaPoseClient::spin()
   }
 
   vpDisplayX *d = NULL;
+  d = new vpDisplayX();
+  // ros::spinOnce();
+  if(UIEnable)
+  {
+    d->init(vpI_); // also init display   //顯示MegaPose可視化界面可以關閉減低效能
+    vpDisplay::setTitle(vpI_, "MegaPose debug " + objectName);    //顯示MegaPose可視化界面可以關閉減低效能
+  }
 
   ros::ServiceClient initial_pose_client = nh_->serviceClient<visp_megapose::Init>("initial_pose");
   ros::ServiceClient track_pose_client = nh_->serviceClient<visp_megapose::Track>("track_pose");
@@ -432,8 +427,8 @@ void MegaPoseClient::spin()
 
         if (initial_pose_client.call(initial_pose_request))
         {
-          ROS_INFO("Initial pose service called successfully.");
-          initial_pose_service_response_callback(initial_pose_response);
+          // ROS_INFO("Initial pose service called successfully.");
+          initial_pose_service_response_callback(initial_pose_request.response);
           init_request_done_ = false;
         } 
         else 
@@ -445,7 +440,6 @@ void MegaPoseClient::spin()
     else if (initialized_)
     {
       visp_megapose::Track track_pose_request;
-      visp_megapose::Track::Response track_pose_response;
       if (track_request_done_)
       {
         track_pose_request.request.object_name = objectName;
@@ -456,8 +450,8 @@ void MegaPoseClient::spin()
 
         if (track_pose_client.call(track_pose_request)) 
         {
-          ROS_INFO("Track pose service called successfully.");
-          track_pose_service_response_callback(track_pose_response);
+          // ROS_INFO("Track pose service called successfully.");
+          track_pose_service_response_callback(track_pose_request.response);
           track_request_done_ = false;
         } 
         else 
@@ -466,7 +460,6 @@ void MegaPoseClient::spin()
         }
       }
       visp_megapose::Render render_request;
-      visp_megapose::Render::Response render_response;
       if (render_request_done_ && overlayModel_ && renderEnable)
       {
         render_request.request.object_name = objectName;
@@ -474,8 +467,8 @@ void MegaPoseClient::spin()
         render_request.request.camera_info = *roscam_info_;
         if (render_client.call(render_request)) 
         {
-          ROS_INFO("Render service called successfully.");
-          render_service_response_callback(render_response);
+          // ROS_INFO("Render service called successfully.");
+          render_service_response_callback(render_request.response);
           render_request_done_ = false;
         } 
         else 
@@ -493,17 +486,26 @@ void MegaPoseClient::spin()
       }
       if (overlay_img_.getSize() > 0 && overlayModel_)
         overlayRender(overlay_img_);
+      else
+        ROS_WARN("overlay_img_ is empty, skipping overlayRender()");
       vpDisplay::displayText(vpI_, 20, 20, "Right click to quit", vpColor::red);
       vpDisplay::displayText(vpI_, 30, 20, "Press t: Toggle overlay", vpColor::red);
       static vpHomogeneousMatrix M_original, M_filter;
-      M_original = visp_bridge::toVispHomogeneousMatrix(transform_);
-      vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
+      
+      // ROS_INFO("confidence_: %f", confidence_);
+      // ROS_INFO("transform_ translation: x=%f, y=%f, z=%f", transform_.translation.x, transform_.translation.y, transform_.translation.z);
+      // ROS_INFO("transform_ rotation: x=%f, y=%f, z=%f, w=%f", transform_.rotation.x, transform_.rotation.y, transform_.rotation.z, transform_.rotation.w);
+      
+      // transformToVispHomogeneousMatrix(transform_, M_original);
+      // vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
       displayScore(confidence_);
       broadcastTransformAndPose(transform_, objectName, camera_tf);
-
       broadcastTransformAndPose_filter(transform_, objectName);
-      M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
-      vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::green, 3);
+      // M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
+      // vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::green, 3);
+      init_request_done_ = true;
+      track_request_done_ = true;
+      render_request_done_ = true;
     }
     broadcastConfidenceScore(objectName,confidence_,initialized_);
 
@@ -520,6 +522,54 @@ void MegaPoseClient::spin()
     loop_rate.sleep();
   }
   delete d;
+}
+
+void MegaPoseClient::transformToVispHomogeneousMatrix(const geometry_msgs::Transform& transform, vpHomogeneousMatrix &M) 
+{
+  ROS_ERROR("1");
+  M.eye();  // 設為單位矩陣
+  ROS_ERROR("M matrix");
+  ROS_ERROR("M matrix after eye() initialization: \n[%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f]", 
+    M[0][0], M[0][1], M[0][2], M[0][3], 
+    M[1][0], M[1][1], M[1][2], M[1][3], 
+    M[2][0], M[2][1], M[2][2], M[2][3]);
+
+  // 檢查 translation 是否包含無效值
+  if (std::isnan(transform.translation.x) || std::isnan(transform.translation.y) || std::isnan(transform.translation.z)) {
+    ROS_ERROR("Invalid transform: translation contains NaN.");
+    return;
+  }
+  ROS_ERROR("2");
+
+  // 驗證 M 的大小和結構
+  ROS_ERROR("M matrix dimensions: 3x4");
+
+  // 提取 translation 和 rotation
+  ROS_ERROR("Transform translation: x=%f, y=%f, z=%f", transform.translation.x, transform.translation.y, transform.translation.z);
+  M[0][3] = transform.translation.x;
+  M[1][3] = transform.translation.y;
+  M[2][3] = transform.translation.z;
+  ROS_ERROR("3");
+
+  // 用 quaternion 計算旋轉矩陣
+  tf::Quaternion quat(transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w);
+  tf::Matrix3x3 R(quat);
+  ROS_ERROR("4");
+
+  // 設定旋轉矩陣
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      M[i][j] = R[i][j];
+    }
+  }
+
+  // 打印矩陣內容
+  ROS_ERROR("M matrix after initialization: \n[%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f]", 
+    M[0][0], M[0][1], M[0][2], M[0][3], 
+    M[1][0], M[1][1], M[1][2], M[1][3], 
+    M[2][0], M[2][1], M[2][2], M[2][3]);
+
+  ROS_ERROR("5");
 }
 
 void MegaPoseClient::initial_pose_service_response_callback(const visp_megapose::Init::Response& future)

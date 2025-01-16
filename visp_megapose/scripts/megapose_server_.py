@@ -4,7 +4,8 @@
 import rospy
 from visp_megapose.srv import Init, Track, Render
 import transforms3d
-
+from geometry_msgs.msg import Transform as RosTransform, Vector3, Quaternion
+from sensor_msgs.msg import Image
 import os
 import json
 import sys
@@ -36,6 +37,7 @@ import numpy as np
 import argparse
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+from cv_bridge import CvBridge, CvBridgeError
 # from PIL import Image
 # import socket
 # import struct
@@ -114,9 +116,9 @@ class MegaPoseServer:
         num_workers = rospy.get_param('~num_workers', 4)
         optimize = rospy.get_param('~optimize', False)
 
-        rospy.Service('initial_pose', Init, self.InitPoseCallback)
-        rospy.Service('track_pose', Track, self.TrackPoseCallback)
-        rospy.Service('render_object', Render, self.RenderObjectCallback)
+        self.init_service = rospy.Service('initial_pose', Init, self.InitPoseCallback)
+        self.track_service = rospy.Service('track_pose', Track, self.TrackPoseCallback)
+        self.render_service = rospy.Service('render_object', Render, self.RenderObjectCallback)
        
         
 
@@ -181,51 +183,67 @@ class MegaPoseServer:
         c.z_far = 100000
         return c
 
-    def InitPoseCallback(self, request, response):
+    def InitPoseCallback(self, request):
+        rospy.loginfo("Received request")
+        pose = RosTransform()
+        confidence = 0.0
+
         depth = None
         camera_data = {
             'K': np.asarray([
-                [request.camera_info.k[0], request.camera_info.k[1], request.camera_info.k[2]],
-                [request.camera_info.k[3], request.camera_info.k[4], request.camera_info.k[5]],
-                [request.camera_info.k[6], request.camera_info.k[7], request.camera_info.k[8]]
+                [request.camera_info.K[0], request.camera_info.K[1], request.camera_info.K[2]],
+                [request.camera_info.K[3], request.camera_info.K[4], request.camera_info.K[5]],
+                [request.camera_info.K[6], request.camera_info.K[7], request.camera_info.K[8]]
             ]),
             'h': request.camera_info.height,
             'w': request.camera_info.width
         }
         self.camera_data = self._make_camera_data(camera_data)
-        print(self.camera_data)
-        img = np.array(request.image.data).reshape((request.camera_info.height, request.camera_info.width, 3))
+        rospy.loginfo(f"Camera Data: {self.camera_data}")
+        # 影像轉換
+        bridge = CvBridge()
+        img = bridge.imgmsg_to_cv2(request.image, desired_encoding="rgb8")
+        # 物件偵測
         object_name = [request.object_name]
         detections = [[request.topleft_j, request.topleft_i, request.bottomright_j, request.bottomright_i]]
         detections = self._make_detections(object_name, detections).cuda()
-        observation = self._make_observation_tensor(img, depth).cuda()
-
+        observation = self._make_observation_tensor(img, depth=None).cuda()
+        # 執行推理
         inference_params = self.model_info['inference_parameters'].copy()
         output, extra_data = self.model.run_inference_pipeline(
             observation, detections=detections, **inference_params, coarse_estimates=None
         )
-        poses = output.poses.cpu().numpy()
-        poses = poses.reshape(len(poses), 4, 4)
+        poses = output.poses.cpu().numpy().reshape(-1, 4, 4)
         confidence = output.infos['pose_score'].to_numpy()
 
         bounding_boxes = extra_data['scoring']['preds'].tensors['boxes_rend'].cpu().numpy().reshape(-1, 4)
         bounding_boxes = bounding_boxes.tolist()
 
-        response.pose.translation.x = float(poses[0][0, 3])
-        response.pose.translation.y = float(poses[0][1, 3])
-        response.pose.translation.z = float(poses[0][2, 3])
+        pose.translation.x = float(poses[0][0, 3])
+        pose.translation.y = float(poses[0][1, 3])
+        pose.translation.z = float(poses[0][2, 3])
         rotation = poses[0][0:3, 0:3]
         rotation = transforms3d.quaternions.mat2quat(rotation)
-        response.pose.rotation.x = rotation[1]
-        response.pose.rotation.y = rotation[2]
-        response.pose.rotation.z = rotation[3]
-        response.pose.rotation.w = rotation[0]
-        response.confidence = float(confidence[0])
-        return response
+        pose.rotation.x = rotation[1]
+        pose.rotation.y = rotation[2]
+        pose.rotation.z = rotation[3]
+        pose.rotation.w = rotation[0]
+        confidence = float(confidence[0])
+        rospy.loginfo(f"init confidence: {confidence}")
+        rospy.loginfo(f"init pose translation: x={pose.translation.x}, y={pose.translation.y}, z={pose.translation.z}")
+        rospy.loginfo(f"init pose rotation: x={pose.rotation.x}, y={pose.rotation.y}, z={pose.rotation.z}, w={pose.rotation.w}")
+        return pose, confidence
 
-    def TrackPoseCallback(self, request, response):
+    def TrackPoseCallback(self, request):
         depth = None
-        img = np.array(request.image.data).reshape((request.camera_info.height, request.camera_info.width, 3))
+        pose = RosTransform()
+        confidence = 0.0
+
+        # 影像轉換
+        bridge = CvBridge()
+        img = bridge.imgmsg_to_cv2(request.image, desired_encoding="rgb8")
+
+        # img = np.array(request.image.data).reshape((request.camera_info.height, request.camera_info.width, 3))
         object_name = [request.object_name]
 
         cTos_np = np.eye(4)
@@ -253,20 +271,22 @@ class MegaPoseServer:
         bounding_boxes = extra_data['scoring']['preds'].tensors['boxes_rend'].cpu().numpy().reshape(-1, 4)
         bounding_boxes = bounding_boxes.tolist()
 
-        response.pose.translation.x = float(poses[0][0, 3])
-        response.pose.translation.y = float(poses[0][1, 3])
-        response.pose.translation.z = float(poses[0][2, 3])
+        pose.translation.x = float(poses[0][0, 3])
+        pose.translation.y = float(poses[0][1, 3])
+        pose.translation.z = float(poses[0][2, 3])
         rotation = poses[0][0:3, 0:3]
         rotation = transforms3d.quaternions.mat2quat(rotation)
-        response.pose.rotation.x = rotation[1]
-        response.pose.rotation.y = rotation[2]
-        response.pose.rotation.z = rotation[3]
-        response.pose.rotation.w = rotation[0]
-        response.confidence = float(confidence[0])
+        pose.rotation.x = rotation[1]
+        pose.rotation.y = rotation[2]
+        pose.rotation.z = rotation[3]
+        pose.rotation.w = rotation[0]
+        confidence = float(confidence[0])
+        rospy.loginfo(f"track confidence: {confidence}")
+        rospy.loginfo(f"track pose translation: x={pose.translation.x}, y={pose.translation.y}, z={pose.translation.z}")
+        rospy.loginfo(f"track pose rotation: x={pose.rotation.x}, y={pose.rotation.y}, z={pose.rotation.z}, w={pose.rotation.w}")
+        return pose, confidence
 
-        return response
-
-    def RenderObjectCallback(self, request, response):
+    def RenderObjectCallback(self, request):
         labels = [request.object_name]
         poses = np.eye(4)
         poses[0:3, 3] = [request.pose.translation.x, request.pose.translation.y, request.pose.translation.z]
@@ -301,14 +321,15 @@ class MegaPoseServer:
         img = renderings.rgb
         img = np.uint8(img).reshape(1, -1).tolist()[0]
 
-        response.image.header.stamp = rospy.Time.now()
-        response.image.height = renderings.rgb.shape[0]
-        response.image.width = renderings.rgb.shape[1]
-        response.image.encoding = 'rgb8'
-        response.image.is_bigendian = 0
-        response.image.step = 3 * renderings.rgb.shape[1]
-        response.image.data = img
-        return response
+        image = Image()
+        image.header.stamp = rospy.Time.now()
+        image.height = renderings.rgb.shape[0]
+        image.width = renderings.rgb.shape[1]
+        image.encoding = 'rgb8'
+        image.is_bigendian = 0
+        image.step = 3 * renderings.rgb.shape[1]
+        image.data = img
+        return image
 
     def _make_detections(self, labels, detections):
         result = []
