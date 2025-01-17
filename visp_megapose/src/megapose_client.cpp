@@ -13,7 +13,10 @@
 // ViSP includes
 // #include <visp3/core/vpTime.h>
 // #include <visp3/gui/vpDisplayX.h>
-// #include <visp3/detection/vpDetectorDNNOpenCV.h>
+#include <visp3/core/vpConfig.h>
+#include <visp3/core/vpIoTools.h>
+#include <visp3/detection/vpDetectorDNNOpenCV.h>
+
 #include <visp3/core/vpImage.h>
 #include <visp3/gui/vpDisplayGDI.h>
 #include <visp3/gui/vpDisplayOpenCV.h>
@@ -134,8 +137,10 @@ private:
   void displayScore(float);
   void transformToVispHomogeneousMatrix(const geometry_msgs::Transform& transform, vpHomogeneousMatrix &M);
   std::optional<vpRect> detectObjectForInitMegaposeClick();
+  std::optional<vpRect> detectObjectForInitMegaposeDnn(const std::string &detectionLabel, double confidenceThreshold);
   vpImage<vpRGBa> overlay_img_;
   vpCameraParameters vpcam_info_;
+  vpDetectorDNNOpenCV dnn_;
   int check_wait_time = 0;
 public:
   explicit MegaPoseClient(ros::NodeHandle* nh, ros::NodeHandle* priv_nh);
@@ -361,7 +366,24 @@ void MegaPoseClient::spin()
   // Initialize DNN detector if detectorMethod is DNN
   if (getDetectionMethodFromString(detectorMethod) == DNN)
   {
-    
+    float detectorMeanR = 0.f, detectorMeanG = 0.f, detectorMeanB = 0.f;
+    float detectorConfidenceThreshold = 0.65f, detectorNmsThreshold = 0.5f, detectorFilterThreshold = -0.25f;
+    float detectorScaleFactor = 0.0039f;
+    bool detectorSwapRB = false;
+
+    vpDetectorDNNOpenCV::DNNResultsParsingType detectorType = vpDetectorDNNOpenCV::dnnResultsParsingTypeFromString(detectorTypeString);
+    vpDetectorDNNOpenCV::NetConfig netConfig(detectorConfidenceThreshold, detectorNmsThreshold, labels, cv::Size(640, 640), detectorFilterThreshold);
+    // vpDetectorDNNOpenCV dnn(netConfig, detectorType);  // I don't know why this doesn't work. If I use this
+    // it will cause the error "Cuda and/or GPU driver might not be correctly installed. Setting preferable backend to CPU and trying again.
+    // terminate called after throwing an instance of 'cv::Exception"
+    dnn_.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+    dnn_.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
+    dnn_.setNetConfig(netConfig);
+    dnn_.setParsingMethod(detectorType);
+    dnn_.readNet(detectorModelPath, detectorConfig, detectorFramework);
+    dnn_.setMean(detectorMeanR, detectorMeanG, detectorMeanB);
+    dnn_.setScaleFactor(detectorScaleFactor);
+    dnn_.setSwapRB(detectorSwapRB);
   }
 
   vpDisplayX *d = NULL;
@@ -405,12 +427,12 @@ void MegaPoseClient::spin()
       }
       else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Auto")
       {
-        // detection_allowed_.detection_allowed = true;
-        // detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
+        detection_allowed_.detection_allowed = true;
+        detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
       }
       else if (getDetectionMethodFromString(detectorMethod) == DNN && detectionMode == "Manual" && detection_allowed_.detection_allowed == true)
       {
-        // detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
+        detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
       }
 
       if (detection && init_request_done_)
@@ -486,8 +508,6 @@ void MegaPoseClient::spin()
       }
       if (overlay_img_.getSize() > 0 && overlayModel_)
         overlayRender(overlay_img_);
-      else
-        ROS_WARN("overlay_img_ is empty, skipping overlayRender()");
       vpDisplay::displayText(vpI_, 20, 20, "Right click to quit", vpColor::red);
       vpDisplay::displayText(vpI_, 30, 20, "Press t: Toggle overlay", vpColor::red);
       static vpHomogeneousMatrix M_original, M_filter;
@@ -496,13 +516,14 @@ void MegaPoseClient::spin()
       // ROS_INFO("transform_ translation: x=%f, y=%f, z=%f", transform_.translation.x, transform_.translation.y, transform_.translation.z);
       // ROS_INFO("transform_ rotation: x=%f, y=%f, z=%f, w=%f", transform_.rotation.x, transform_.rotation.y, transform_.rotation.z, transform_.rotation.w);
       
+      M_original = visp_bridge::toVispHomogeneousMatrix(transform_);
       // transformToVispHomogeneousMatrix(transform_, M_original);
-      // vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
+      vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
       displayScore(confidence_);
       broadcastTransformAndPose(transform_, objectName, camera_tf);
       broadcastTransformAndPose_filter(transform_, objectName);
-      // M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
-      // vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::green, 3);
+      M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
+      vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::green, 3);
       init_request_done_ = true;
       track_request_done_ = true;
       render_request_done_ = true;
@@ -646,7 +667,6 @@ vpColor MegaPoseClient::interpolate(const vpColor &low, const vpColor &high, con
   return vpColor((unsigned char)r, (unsigned char)g, (unsigned char)b);
 }
 
-/*
 std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::string &detectionLabel, double confidenceThreshold)
 {
   cv::Mat I = cv_bridge::toCvCopy(rosI_, rosI_->encoding)->image;
@@ -701,7 +721,6 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
   check_wait_time = 0;
   return bestDetection->getBoundingBox();
 }
-*/
 
 std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeClick()
 {
