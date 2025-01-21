@@ -17,7 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   rospy
   message_generation
-  visual_servoing
+  forklift_server
 )
 
 ## 設定自編譯 ViSP 的目錄
@@ -75,17 +75,17 @@ catkin_package(
   roscpp
   visp_bridge
   cv_bridge
-  visual_servoing
+  forklift_server
   DEPENDS VISP
 )
 
 ## 安裝 Python 腳本
-catkin_install_python(PROGRAMS
-  scripts/megapose_server_.py
-  scripts/test.py
-  scripts/ros_pose_hz_to_csv.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
+# catkin_install_python(PROGRAMS
+#   scripts/megapose_server_.py
+#   scripts/test.py
+#   scripts/ros_pose_hz_to_csv.py
+#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+# )
 
 ## 建立 megapose_client 可執行檔
 add_executable(megapose_client src/megapose_client.cpp)

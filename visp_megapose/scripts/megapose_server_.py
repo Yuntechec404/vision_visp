@@ -184,7 +184,7 @@ class MegaPoseServer:
         return c
 
     def InitPoseCallback(self, request):
-        rospy.loginfo("Received request")
+        rospy.loginfo("Init Pose Received request")
         pose = RosTransform()
         confidence = 0.0
 
@@ -199,7 +199,7 @@ class MegaPoseServer:
             'w': request.camera_info.width
         }
         self.camera_data = self._make_camera_data(camera_data)
-        rospy.loginfo(f"Camera Data: {self.camera_data}")
+        # rospy.loginfo(f"Camera Data: {self.camera_data}")
         # 影像轉換
         bridge = CvBridge()
         img = bridge.imgmsg_to_cv2(request.image, desired_encoding="rgb8")
@@ -229,9 +229,9 @@ class MegaPoseServer:
         pose.rotation.z = rotation[3]
         pose.rotation.w = rotation[0]
         confidence = float(confidence[0])
-        rospy.loginfo(f"init confidence: {confidence}")
-        rospy.loginfo(f"init pose translation: x={pose.translation.x}, y={pose.translation.y}, z={pose.translation.z}")
-        rospy.loginfo(f"init pose rotation: x={pose.rotation.x}, y={pose.rotation.y}, z={pose.rotation.z}, w={pose.rotation.w}")
+        # rospy.loginfo(f"init confidence: {confidence}")
+        # rospy.loginfo(f"init pose translation: x={pose.translation.x}, y={pose.translation.y}, z={pose.translation.z}")
+        # rospy.loginfo(f"init pose rotation: x={pose.rotation.x}, y={pose.rotation.y}, z={pose.rotation.z}, w={pose.rotation.w}")
         return pose, confidence
 
     def TrackPoseCallback(self, request):
@@ -281,9 +281,9 @@ class MegaPoseServer:
         pose.rotation.z = rotation[3]
         pose.rotation.w = rotation[0]
         confidence = float(confidence[0])
-        rospy.loginfo(f"track confidence: {confidence}")
-        rospy.loginfo(f"track pose translation: x={pose.translation.x}, y={pose.translation.y}, z={pose.translation.z}")
-        rospy.loginfo(f"track pose rotation: x={pose.rotation.x}, y={pose.rotation.y}, z={pose.rotation.z}, w={pose.rotation.w}")
+        # rospy.loginfo(f"track confidence: {confidence}")
+        # rospy.loginfo(f"track pose translation: x={pose.translation.x}, y={pose.translation.y}, z={pose.translation.z}")
+        # rospy.loginfo(f"track pose rotation: x={pose.rotation.x}, y={pose.rotation.y}, z={pose.rotation.z}, w={pose.rotation.w}")
         return pose, confidence
 
     def RenderObjectCallback(self, request):

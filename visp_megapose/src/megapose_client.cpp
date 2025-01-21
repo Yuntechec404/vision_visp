@@ -36,7 +36,7 @@
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/Image.h>
 #include <geometry_msgs/Pose.h>
-#include <visual_servoing/Detection.h>
+#include <forklift_server/Detection.h>
 
 // ROS 1 message filters
 #include <message_filters/subscriber.h>
@@ -125,7 +125,7 @@ private:
   
   void init_parameter();
   void waitForImage();
-  void detectionAllowedCallback(const visual_servoing::Detection &msg);
+  void detectionAllowedCallback(const forklift_server::Detection &msg);
   void frameCallback(const sensor_msgs::ImageConstPtr &image, const sensor_msgs::CameraInfoConstPtr &camera_info);
   void overlayRender(const vpImage<vpRGBa> &overlay);
   DetectionMethod getDetectionMethodFromString(const std::string &str);
@@ -246,7 +246,7 @@ void MegaPoseClient::frameCallback(const sensor_msgs::ImageConstPtr &image,
   got_image_ = true;
 }
 
-void MegaPoseClient::detectionAllowedCallback(const visual_servoing::Detection &msg)
+void MegaPoseClient::detectionAllowedCallback(const forklift_server::Detection &msg)
 {
   detection_allowed_.detection_allowed = msg.detection_allowed;
   detection_allowed_.layer = msg.layer;
