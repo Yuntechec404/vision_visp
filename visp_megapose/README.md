@@ -13,9 +13,9 @@ To know more about MegaPose see https://megapose6d.github.io/.
 This is my test equipment:
 
 - Operating System
-	- Ubuntu 22.04
+	- Ubuntu 20.04
 - ROS
-	- ROS2 humble
+	- ROS noetic
 - GPU
 	- RTX 2080ti with 12GB VRAM 
 	
@@ -33,14 +33,14 @@ The following third-party packages are recommended to be installed from source c
 - ViSP 3.6.0
 - OpenCV 4.7.0 (GPU version) 
 
-	⚠️There may be a conflict with ROS2's OpenCV. Please follow the official  [tutorial](https://visp-doc.inria.fr/doxygen/visp-daily/tutorial-detection-dnn.html) to remove the version installed by ROS2.
+	⚠️There may be a conflict with ROS's OpenCV. Please follow the official  [tutorial](https://visp-doc.inria.fr/doxygen/visp-daily/tutorial-detection-dnn.html) to remove the version installed by ROS.
 
 	![alt text](README_src/image-3.png)
 - nlohmann-json3
 
 - Anaconda
 
-⚠️ When following the official tutorial, please change the official Anaconda setting config "megapose_environment.yml" from Python 3.9 to 3.10, or you won't be able to activate the ROS2 version of the MegaPose server. (If you are using ROS2 Foxy, change the Python version to 3.8).
+⚠️ When following the official tutorial, please change the official Anaconda setting config "megapose_environment.yml" from Python 3.9 to 3.8, or you won't be able to activate the ROS version of the MegaPose server. (If you are using ROS2 humble, change the Python version to 3.10).
 
 ![alt text](README_src/image-4.png)
 
@@ -77,12 +77,12 @@ The visp_megapose client provides 2 ways to supply the bounding box:
 
 ![alt text](README_src/image-2.png)
 
-## ROS2 Denpendence
+## ROS Denpendence
 
 - transforms3d
 
-The fellowing ROS2 Denpendence recommand install by source code.
-- cv_bridge 
+The fellowing ROS Denpendence recommand install by source code.
+- cv_bridge
 - visp_bridge
 
 ## install visp_megapose
@@ -91,32 +91,28 @@ The fellowing ROS2 Denpendence recommand install by source code.
 
 	$ cd path/to/your/workspace/src
 
-	$ git clone https://github.com/ros-perception/vision_opencv.git
 
-	$ git clone https://github.com/m11112089/vision_visp.git
+	$ git clone https://github.com/Yuntechec404/vision_visp -b ros1-noetic
 
 
-2. Compile cv_bridge and visp_bridge:
+2. install cv_bridge:
 
-	$ cd ..
+	$ sudo apt-get install ros-noetic-cv-bridge*
 
-	$ colcon build --packages-select cv_bridge 
 
-	$ colcon build --packages-select  visp_bridge
-
-3. Install transforms3d:
+4. Install transforms3d, rospkg:
 
 	$ conda activate megapose
 
-	(megapose) $ pip3 install transforms3d
+	(megapose) $ pip install transforms3d
 
-4. Compile visp_megapose:
+	(megapose) $ pip install rospkg rospy catkin_tools
 
-	(megapose)$ colcon build --packages-select visp_megapose
+6. Compile :
 
-	(megapose)$ source install/setup.bash
+	$ catkin_make
 
-5. Copy the MegaPose config:
+7. Copy the MegaPose config:
 
 	$ cp  path/to/your/workspace/src/vision_visp/visp_megapose/script $VISP_WS/visp/script/megapose_server/megapose_variables_final.json
 
@@ -128,15 +124,15 @@ https://drive.google.com/file/d/19j8EUod1O1bmtc549R-V6tZ8BN8O80-c/view?usp=shari
 
 	$ unzip visp_megapose_bag.zip
 
-2. Play the ROS2 bag file:
+2. Play the ROS bag file:
 
-	$ ros2 bag play megapose_bag/subset
+	$ rosbag play megapose_bag/subset
 
 3. Run the visp_megapose Demo:
 
-	(megapose) $ ros2 launch visp_megapose megapose_server.launch
+	(megapose) $ roslaunch visp_megapose megapose_server.launch
 
-	(megapose) $ ros2 launch visp_megapose megapose_client.launch
+   	$ roslaunch visp_megapose megapose_client.launch
 
 If your detector_method is "DNN".
 
