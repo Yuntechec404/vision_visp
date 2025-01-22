@@ -99,7 +99,7 @@ private:
   bool renderEnable;
   bool UIEnable;
   std::string detectionMode;
-  std::string detection_allowed_topic;
+  // std::string detection_allowed_topic;
   int buffer_size;
 
   double reinitThreshold_,refilterThreshold_;
@@ -165,7 +165,7 @@ MegaPoseClient::MegaPoseClient(ros::NodeHandle* nh, ros::NodeHandle* priv_nh)
   overlayModel_ = true;
   
   // 訂閱主題
-  detection_allowed_sub_ = nh_->subscribe(detection_allowed_topic, 1, &MegaPoseClient::detectionAllowedCallback, this);
+  detection_allowed_sub_ = nh_->subscribe(objectName + "_detection", 1, &MegaPoseClient::detectionAllowedCallback, this);
   sync_.registerCallback(boost::bind(&MegaPoseClient::frameCallback, this, _1, _2));
 
   ROS_INFO("MegaPoseClient initialized.");
@@ -198,7 +198,7 @@ void MegaPoseClient::init_parameter()
   priv_nh_->param<bool>("render_enable", renderEnable, true);
   priv_nh_->param<bool>("UI_enable", UIEnable, true);
   priv_nh_->param<std::string>("detection_mode", detectionMode, "Auto");
-  priv_nh_->param<std::string>("detection_allowed_topic", detection_allowed_topic, "/shelf_detection");
+  // priv_nh_->param<std::string>("detection_allowed_topic", detection_allowed_topic, "/shelf_detection");
   priv_nh_->param<int>("buffer_size", buffer_size, 5);
 
   ROS_INFO("=== Parameters Loaded ===");
@@ -211,7 +211,7 @@ void MegaPoseClient::init_parameter()
   ROS_INFO("Render enable: %s", renderEnable ? "True" : "False");
   ROS_INFO("UI enable: %s", UIEnable ? "True" : "False");
   ROS_INFO("Detection mode: %s", detectionMode.c_str());
-  ROS_INFO("Detection allowed topic: %s", detection_allowed_topic.c_str());
+  // ROS_INFO("Detection allowed topic: %s", detection_allowed_topic.c_str());
   ROS_INFO("Buffer size: %d", buffer_size);
 }
 
@@ -415,8 +415,14 @@ void MegaPoseClient::spin()
   {
     vpDisplay::display(vpI_);
     ros::spinOnce();
-    vpDisplay::displayText(vpI_, 40, 20, "Detection allowed state: " + detection_allowed_.detection_allowed, vpColor::red);
+    if(detection_allowed_.detection_allowed)
+      vpDisplay::displayText(vpI_, 40, 20, "Detection allowed state: True", vpColor::red);
+    else
+      vpDisplay::displayText(vpI_, 40, 20, "Detection allowed state: False", vpColor::red);
 
+    // ROS_INFO("initialized_ %d", initialized_ );
+    // ROS_INFO("init_request_done_ %d", init_request_done_ );
+    // ROS_INFO("detection_allowed_.detection_allowed %d", detection_allowed_.detection_allowed );
     if (!initialized_)
     {
       std::optional<vpRect> detection = std::nullopt;

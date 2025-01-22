@@ -18,7 +18,7 @@
     <!-- 設定檢測模式(Auto 或 Manual) -->
     <param name="detection_mode" value="Manual"/>
     <!-- 設定檢測允許主題 -->
-    <param name="detection_allowed_topic" value="/pallet_detection"/>
+    <!-- <param name="detection_allowed_topic" value="/pallet_detection"/> -->
     <!-- 設定moving average filter -->
     <param name="buffer_size" value="5"/>
   </node>
