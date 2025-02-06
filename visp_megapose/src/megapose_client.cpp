@@ -265,7 +265,7 @@ void MegaPoseClient::broadcastTransformAndPose(const geometry_msgs::Transform &t
   transformStamped.transform = transform;
   tf_broadcaster_.sendTransform(transformStamped);
   // publish target pose
-  static ros::Publisher pub_pose_ = nh_->advertise<geometry_msgs::Pose>(objectName, 1);
+  static ros::Publisher pub_pose_ = nh_->advertise<geometry_msgs::Pose>(objectName, 1, true);
   // static auto pub_pose_ = this->create_publisher<geometry_msgs::Pose>(objectName, 1);
   geometry_msgs::Pose pose;
   pose.position.x = transform.translation.x;
@@ -308,7 +308,7 @@ void MegaPoseClient::broadcastTransformAndPose_filter(const geometry_msgs::Trans
     filter_transform_.rotation.y = calculateMovingAverage(buffer_qy);
     filter_transform_.rotation.z = calculateMovingAverage(buffer_qz);
 
-    static ros::Publisher pub_filter_ = nh_->advertise<geometry_msgs::Pose>(objectName + "_filter", 1);
+    static ros::Publisher pub_filter_ = nh_->advertise<geometry_msgs::Pose>(objectName + "_filter", 1, true);
     // static auto pub_filter_ = this->create_publisher<geometry_msgs::Pose>(objectName + "_filter", 1);
     geometry_msgs::Pose pose;
     pose.position.x = filter_transform_.translation.x;
@@ -336,7 +336,7 @@ double MegaPoseClient::calculateMovingAverage(const std::deque<double>& buffer)
 void MegaPoseClient::broadcastConfidenceScore(const std::string &objectName, float confidence_score, bool detection)
 {
   // publish confidence score
-  static ros::Publisher pub_confidence_ = nh_->advertise<visp_megapose::Confidence>(objectName + "_confidence", 1);
+  static ros::Publisher pub_confidence_ = nh_->advertise<visp_megapose::Confidence>(objectName + "_confidence", 1, true);
   // static auto pub_confidence_ = this->create_publisher<visp_megapose::msg::Confidence>(objectName + "_confidence", 1);
   visp_megapose::Confidence confidence_msg;
   confidence_msg.object_confidence = confidence_score;
@@ -524,12 +524,12 @@ void MegaPoseClient::spin()
       
       M_original = visp_bridge::toVispHomogeneousMatrix(transform_);
       // transformToVispHomogeneousMatrix(transform_, M_original);
-      vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
+      // vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
       displayScore(confidence_);
       broadcastTransformAndPose(transform_, objectName, camera_tf);
       broadcastTransformAndPose_filter(transform_, objectName);
       M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
-      vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::green, 3);
+      vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::none, 3);
       init_request_done_ = true;
       track_request_done_ = true;
       render_request_done_ = true;
@@ -710,7 +710,7 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
     return matchingDetections[0].getBoundingBox();
   }
 
-  // 如果有多個目標，優先選擇靠下的目標
+  // 有多個目標
   auto bestDetection = std::max_element(
     matchingDetections.begin(),
     matchingDetections.end(),
@@ -720,7 +720,7 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
       double bottomA = bboxA.getTop() + bboxA.getHeight();
       double bottomB = bboxB.getTop() + bboxB.getHeight();
       if (detection_allowed_.layer == 2.0) {
-        return bottomA > bottomB; // 優先選擇靠下的目標
+        return bottomA > bottomB;
       }
       return bottomA < bottomB;
     });
