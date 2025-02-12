@@ -8,7 +8,7 @@
     <!-- 選擇檢測方法 (CLICK 或 DNN) -->
     <param name="detector_method" value="DNN"/>  
     <!-- 設定模型檔案路徑 (yolov7 onnx 格式) -->
-    <param name="detector_model_path" value="$(find visp_megapose)/data/pallet.onnx"/>
+    <param name="detector_model_path" value="$(find visp_megapose)/data/pallet_custom.onnx"/>
     <!-- 設定 DNN 檢測物體名稱 -->
     <param name="object_name" value="pallet"/>
     <!-- 啟用或禁用渲染服務(True or False) -->
