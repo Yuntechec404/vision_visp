@@ -115,11 +115,11 @@ private:
 
   void initial_pose_service_response_callback(const visp_megapose::Init::Response& future);
   bool initialized_;
-  bool init_request_done_;
+  // bool init_request_done_;
   void track_pose_service_response_callback(const visp_megapose::Track::Response& future);
-  bool track_request_done_;
+  // bool track_request_done_;
   void render_service_response_callback(const visp_megapose::Render::Response& future);
-  bool render_request_done_;
+  // bool render_request_done_;
   float confidence_score;
   bool overlayModel_;
   
@@ -138,6 +138,7 @@ private:
   void transformToVispHomogeneousMatrix(const geometry_msgs::Transform& transform, vpHomogeneousMatrix &M);
   std::optional<vpRect> detectObjectForInitMegaposeClick();
   std::optional<vpRect> detectObjectForInitMegaposeDnn(const std::string &detectionLabel, double confidenceThreshold);
+  void displayBoundingBoxOnVispWindow(const std::string &detectionLabel, const std::optional<vpRect> &bboxOpt);
   vpImage<vpRGBa> overlay_img_;
   vpCameraParameters vpcam_info_;
   vpDetectorDNNOpenCV dnn_;
@@ -159,9 +160,9 @@ MegaPoseClient::MegaPoseClient(ros::NodeHandle* nh, ros::NodeHandle* priv_nh)
   refilterThreshold_ = 0.5;
   initialized_ = false;
   got_image_ = false;
-  init_request_done_ = true;
-  track_request_done_ = true;
-  render_request_done_ = true;
+  // init_request_done_ = true;
+  // track_request_done_ = true;
+  // render_request_done_ = true;
   overlayModel_ = true;
   
   // 訂閱主題
@@ -441,7 +442,7 @@ void MegaPoseClient::spin()
         detection = detectObjectForInitMegaposeDnn(objectName, 0.5);
       }
 
-      if (detection && init_request_done_)
+      if (detection)
       {
         visp_megapose::Init initial_pose_request;
         visp_megapose::Init::Response initial_pose_response;
@@ -457,7 +458,7 @@ void MegaPoseClient::spin()
         {
           // ROS_INFO("Initial pose service called successfully.");
           initial_pose_service_response_callback(initial_pose_request.response);
-          init_request_done_ = false;
+          // init_request_done_ = false;
         } 
         else 
         {
@@ -468,8 +469,8 @@ void MegaPoseClient::spin()
     else if (initialized_)
     {
       visp_megapose::Track track_pose_request;
-      if (track_request_done_)
-      {
+      // if (track_request_done_)
+      // {
         track_pose_request.request.object_name = objectName;
         track_pose_request.request.init_pose = transform_;
         track_pose_request.request.refiner_iterations = 1;
@@ -480,15 +481,15 @@ void MegaPoseClient::spin()
         {
           // ROS_INFO("Track pose service called successfully.");
           track_pose_service_response_callback(track_pose_request.response);
-          track_request_done_ = false;
+          // track_request_done_ = false;
         } 
         else 
         {
           ROS_ERROR("Failed to call track pose service.");
         }
-      }
+      // }
       visp_megapose::Render render_request;
-      if (render_request_done_ && overlayModel_ && renderEnable)
+      if (overlayModel_ && renderEnable)
       {
         render_request.request.object_name = objectName;
         render_request.request.pose = transform_;
@@ -497,7 +498,7 @@ void MegaPoseClient::spin()
         {
           // ROS_INFO("Render service called successfully.");
           render_service_response_callback(render_request.response);
-          render_request_done_ = false;
+          // render_request_done_ = false;
         } 
         else 
         {
@@ -530,9 +531,9 @@ void MegaPoseClient::spin()
       broadcastTransformAndPose_filter(transform_, objectName);
       M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
       vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::none, 3);
-      init_request_done_ = true;
-      track_request_done_ = true;
-      render_request_done_ = true;
+      // init_request_done_ = true;
+      // track_request_done_ = true;
+      // render_request_done_ = true;
     }
     broadcastConfidenceScore(objectName,confidence_,initialized_);
 
@@ -545,8 +546,7 @@ void MegaPoseClient::spin()
         break; // Right click to stop
       }
     }
-
-    loop_rate.sleep();
+    // loop_rate.sleep();
   }
   delete d;
 }
@@ -601,7 +601,7 @@ void MegaPoseClient::transformToVispHomogeneousMatrix(const geometry_msgs::Trans
 
 void MegaPoseClient::initial_pose_service_response_callback(const visp_megapose::Init::Response& future)
 {
-  init_request_done_ = true;
+  // init_request_done_ = true;
   transform_ = future.pose;
   confidence_ = future.confidence;
   if (confidence_ <= refilterThreshold_)
@@ -628,7 +628,7 @@ void MegaPoseClient::initial_pose_service_response_callback(const visp_megapose:
 
 void MegaPoseClient::track_pose_service_response_callback(const visp_megapose::Track::Response& future)
 {
-  track_request_done_ = true;
+  // track_request_done_ = true;
   transform_ = future.pose;
   confidence_ = future.confidence;
   if (detectionMode == "Manual" && detection_allowed_.detection_allowed == false)
@@ -645,7 +645,7 @@ void MegaPoseClient::track_pose_service_response_callback(const visp_megapose::T
 
 void MegaPoseClient::render_service_response_callback(const visp_megapose::Render::Response& future)
 {
-  render_request_done_ = true;
+  // render_request_done_ = true;
   overlay_img_ = visp_bridge::toVispImageRGBa(future.image);
 }
 
@@ -695,22 +695,29 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
   if (matchingDetections.empty()) 
   {
     check_wait_time = 0;
+    vpDisplay::displayText(vpI_, 20, 20, "No object detected", vpColor::red);
     return std::nullopt;
   }
   
   check_wait_time ++;
-  if (check_wait_time <= 10)
+  if (check_wait_time <= 20)
   {
+    vpDisplay::displayText(vpI_, 20, 20, "No object detected", vpColor::red);
     return std::nullopt;
   }
   
   if(matchingDetections.size() == 1)
   {
     check_wait_time = 0;
+    displayBoundingBoxOnVispWindow(detectionLabel, matchingDetections[0].getBoundingBox());
     return matchingDetections[0].getBoundingBox();
   }
 
   // 有多個目標
+  for (const auto &detection : matchingDetections)
+  {
+    displayBoundingBoxOnVispWindow(detectionLabel, detection.getBoundingBox());
+  }
   auto bestDetection = std::max_element(
     matchingDetections.begin(),
     matchingDetections.end(),
@@ -726,6 +733,24 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
     });
   check_wait_time = 0;
   return bestDetection->getBoundingBox();
+}
+
+void MegaPoseClient::displayBoundingBoxOnVispWindow(const std::string &detectionLabel, const std::optional<vpRect> &bboxOpt)
+{
+  vpRect bbox = bboxOpt.value();
+  vpImagePoint ip1(static_cast<int>(bbox.getTop()), static_cast<int>(bbox.getLeft()));    // 左上角
+  vpImagePoint ip2(static_cast<int>(bbox.getTop()), static_cast<int>(bbox.getRight()));   // 右上角
+  vpImagePoint ip3(static_cast<int>(bbox.getBottom()), static_cast<int>(bbox.getRight()));  // 右下角
+  vpImagePoint ip4(static_cast<int>(bbox.getBottom()), static_cast<int>(bbox.getLeft()));   // 左下角
+  
+  vpDisplay::displayLine(vpI_, ip1, ip2, vpColor::red, 2, true);  // 線寬為 2，紅色
+  vpDisplay::displayLine(vpI_, ip2, ip3, vpColor::red, 2, true);
+  vpDisplay::displayLine(vpI_, ip3, ip4, vpColor::red, 2, true);
+  vpDisplay::displayLine(vpI_, ip4, ip1, vpColor::red, 2, true);
+  
+  // 在矩形左上方顯示 detectionLabel
+  vpDisplay::displayText(vpI_, static_cast<int>(bbox.getTop()) - 10, static_cast<int>(bbox.getLeft()), detectionLabel, vpColor::red);
+  vpDisplay::flush(vpI_); // 刷新顯示結果
 }
 
 std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeClick()
