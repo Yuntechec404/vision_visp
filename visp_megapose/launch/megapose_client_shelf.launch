@@ -21,5 +21,7 @@
     <!-- <param name="detection_allowed_topic" value="/shelf_detection"/> -->
     <!-- 設定moving average filter -->
     <param name="buffer_size" value="5"/>
+    <!-- 設定是否使用 bounding box (True or False)-->
+    <param name="bounding_box" value="True"/> 
   </node>
 </launch>
