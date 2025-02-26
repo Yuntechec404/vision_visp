@@ -96,6 +96,7 @@ private:
   std::string detectorMethod;
   std::string detectorModelPath;
   std::string objectName;
+  bool bounding_box;
   bool renderEnable;
   bool UIEnable;
   std::string detectionMode;
@@ -201,6 +202,8 @@ void MegaPoseClient::init_parameter()
   priv_nh_->param<std::string>("detection_mode", detectionMode, "Auto");
   // priv_nh_->param<std::string>("detection_allowed_topic", detection_allowed_topic, "/shelf_detection");
   priv_nh_->param<int>("buffer_size", buffer_size, 5);
+  // 設定是否使用 bounding box
+  priv_nh_->param<bool>("bounding_box", bounding_box, true);
 
   ROS_INFO("=== Parameters Loaded ===");
   ROS_INFO("Image topic: %s", image_topic.c_str());
@@ -214,6 +217,8 @@ void MegaPoseClient::init_parameter()
   ROS_INFO("Detection mode: %s", detectionMode.c_str());
   // ROS_INFO("Detection allowed topic: %s", detection_allowed_topic.c_str());
   ROS_INFO("Buffer size: %d", buffer_size);
+  // 設定是否使用 bounding box
+  ROS_INFO("Bounding box: %s", bounding_box ? "True" : "False");
 }
 
 void MegaPoseClient::waitForImage()
@@ -709,14 +714,22 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
   if(matchingDetections.size() == 1)
   {
     check_wait_time = 0;
-    displayBoundingBoxOnVispWindow(detectionLabel, matchingDetections[0].getBoundingBox());
+    // 設定 bounding box
+    if (bounding_box)
+    {
+      displayBoundingBoxOnVispWindow(detectionLabel, matchingDetections[0].getBoundingBox());
+    }
     return matchingDetections[0].getBoundingBox();
   }
 
   // 有多個目標
   for (const auto &detection : matchingDetections)
   {
-    displayBoundingBoxOnVispWindow(detectionLabel, detection.getBoundingBox());
+    // 設定 bounding box
+    if (bounding_box)
+    {
+      displayBoundingBoxOnVispWindow(detectionLabel, detection.getBoundingBox());
+    }
   }
   auto bestDetection = std::max_element(
     matchingDetections.begin(),
