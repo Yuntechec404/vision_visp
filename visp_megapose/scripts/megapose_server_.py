@@ -220,7 +220,7 @@ class MegaPoseServer:
         if self.model_use_depth:
             try:
                 depth_uint16 = bridge.imgmsg_to_cv2(req.depth, desired_encoding="passthrough")
-                depth = depth_uint16.astype(np.float32) / 1000.0  # 轉換為公尺單位
+                depth = depth_uint16.astype(np.float32) / 1.0
             except CvBridgeError as e:
                 rospy.logerr("CvBridge error (depth): %s", e)
                 return pose, confidence
@@ -268,7 +268,7 @@ class MegaPoseServer:
         if self.model_use_depth:
             try:
                 depth_uint16 = bridge.imgmsg_to_cv2(req.depth, desired_encoding="passthrough")
-                depth = depth_uint16.astype(np.float32) / 1000.0  # 轉換為公尺單位
+                depth = depth_uint16.astype(np.float32) / 1
             except CvBridgeError as e:
                 rospy.logerr("CvBridge error (depth): %s", e)
                 return pose, confidence
