@@ -4,7 +4,7 @@
     <!-- MESHES_DIRECTORY
       Directory containing the 3D models. each 3D model must be
       in its own subfolder -->
-    <param name="megapose_models" value="RGB"/>
+    <param name="megapose_models" value="RGBD" /> 
     <!-- {RGB, RGBD, RGB-multi-hypothesis, RGBD-multi-hypothesis}
       Which MegaPose model to use. Some models require the depth
       map. Some models generate multiple hypotheses when

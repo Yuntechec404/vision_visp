@@ -13,7 +13,6 @@ import megapose_server
 # Set megapose environment variables
 sys.path.append('/home/user/anaconda3/envs/megapose/lib/python3.8/site-packages')
 megapose_server_install_dir = os.path.dirname(megapose_server.__file__)
-# variables_file = os.path.join(megapose_server_install_dir, 'megapose_variables_final.json')
 variables_file = '/home/user/catkin_ws/src/vision_visp/visp_megapose/scripts/megapose_variables_final.json'
 with open(variables_file, 'r') as f:
     json_vars = json.load(f)
@@ -38,13 +37,6 @@ import argparse
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 from cv_bridge import CvBridge, CvBridgeError
-# from PIL import Image
-# import socket
-# import struct
-# import io
-# import sys
-# import traceback
-# from operator import itemgetter
 import pandas as pd
 import torch
 import torch.fx as fx
@@ -103,6 +95,12 @@ def make_object_dataset(meshes_dir: Path) -> RigidObjectDataset:
     return rigid_object_dataset
 
 class MegaPoseServer:
+    """
+    ROS service 版本的 MegaPose 伺服器，提供下列服務：
+      1. initial_pose (Init) : 根據輸入影像、相機資訊、物體名稱與檢測框，估計初始位姿與信心分數。
+      2. track_pose (Track) : 根據輸入影像與先前位姿，更新物體位姿與信心分數。
+      3. render_object (Render) : 根據物體名稱與位姿，渲染物體圖像並回傳 ROS Image。
+    """
     def __init__(self, image_batch_size=256, warmup=True):
         rospy.init_node('MegaPoseServer')
 
@@ -111,6 +109,7 @@ class MegaPoseServer:
         assert mesh_dir.exists(), 'Mesh directory does not exist, cannot start server'
 
         model_name = rospy.get_param('~megapose_models', 'RGB')
+        model_use_depth = megapose_models[model_name][1]
         model_name = megapose_models[model_name][0]
 
         num_workers = rospy.get_param('~num_workers', 4)
@@ -135,6 +134,15 @@ class MegaPoseServer:
         torch.backends.cudnn.deterministic = False
         self.optimize = optimize
         self.warmup = warmup
+        self.model_use_depth = model_use_depth
+
+        rospy.logwarn("MegaPose server initialized")
+        rospy.logwarn("Model: %s", model_name)
+        rospy.logwarn("Model requires depth: %s", self.model_use_depth)
+        rospy.logwarn("Mesh directory: %s", mesh_dir)
+        rospy.logwarn("Number of workers: %d", num_workers)
+        rospy.logwarn("Optimize: %s", optimize)
+        rospy.logwarn("Warmup: %s", warmup)
 
         if self.optimize:
             print('Optimizing Pytorch models...')
@@ -183,107 +191,122 @@ class MegaPoseServer:
         c.z_far = 100000
         return c
 
-    def InitPoseCallback(self, request):
-        rospy.loginfo("Init Pose Received request")
+    def _make_observation_tensor(self, image: np.ndarray, depth: Optional[np.ndarray] = None) -> ObservationTensor:
+        '''
+        Create an observation tensor from an image and a potential depth image
+        '''
+        return ObservationTensor.from_numpy(image, depth, self.camera_data.K)
+
+    def _make_detections(self, labels, detections):
+        result = []
+        for label, detection in zip(labels, detections):
+            o = ObjectData(label)
+            o.bbox_modal = detection
+            result.append(o)
+        return make_detections_from_object_data(result)
+
+    def InitPoseCallback(self, req):
+        rospy.loginfo("InitPose service request received")
+        bridge = CvBridge()
         pose = RosTransform()
         confidence = 0.0
-
+        try:
+            img = bridge.imgmsg_to_cv2(req.image, desired_encoding="rgb8")
+        except CvBridgeError as e:
+            rospy.logerr("CvBridge error: %s", e)
+            return pose, confidence
+        # 使用 depth 資訊（如果 req.use_depth 為 True）
         depth = None
-        camera_data = {
-            'K': np.asarray([
-                [request.camera_info.K[0], request.camera_info.K[1], request.camera_info.K[2]],
-                [request.camera_info.K[3], request.camera_info.K[4], request.camera_info.K[5]],
-                [request.camera_info.K[6], request.camera_info.K[7], request.camera_info.K[8]]
-            ]),
-            'h': request.camera_info.height,
-            'w': request.camera_info.width
+        if self.model_use_depth:
+            try:
+                depth_uint16 = bridge.imgmsg_to_cv2(req.depth, desired_encoding="passthrough")
+                depth = depth_uint16.astype(np.float32) / 1000.0  # 轉換為公尺單位
+            except CvBridgeError as e:
+                rospy.logerr("CvBridge error (depth): %s", e)
+                return pose, confidence
+        # 更新相機資訊
+        cam_data = {
+            'K': np.asarray(req.camera_info.K).reshape(3,3),
+            'h': req.camera_info.height,
+            'w': req.camera_info.width
         }
-        self.camera_data = self._make_camera_data(camera_data)
-        # rospy.loginfo(f"Camera Data: {self.camera_data}")
-        # 影像轉換
-        bridge = CvBridge()
-        img = bridge.imgmsg_to_cv2(request.image, desired_encoding="rgb8")
-        # 物件偵測
-        object_name = [request.object_name]
-        detections = [[request.topleft_j, request.topleft_i, request.bottomright_j, request.bottomright_i]]
+        self.camera_data = self._make_camera_data(cam_data)
+        # 物件偵測：利用請求中的 bounding box
+        object_name = [req.object_name]
+        detections = [[req.topleft_j, req.topleft_i, req.bottomright_j, req.bottomright_i]]
         detections = self._make_detections(object_name, detections).cuda()
-        observation = self._make_observation_tensor(img, depth=None).cuda()
-        # 執行推理
+        observation = self._make_observation_tensor(img, depth).cuda()
         inference_params = self.model_info['inference_parameters'].copy()
         output, extra_data = self.model.run_inference_pipeline(
             observation, detections=detections, **inference_params, coarse_estimates=None
         )
-        poses = output.poses.cpu().numpy().reshape(-1, 4, 4)
-        confidence = output.infos['pose_score'].to_numpy()
-
-        bounding_boxes = extra_data['scoring']['preds'].tensors['boxes_rend'].cpu().numpy().reshape(-1, 4)
-        bounding_boxes = bounding_boxes.tolist()
-
-        pose.translation.x = float(poses[0][0, 3])
-        pose.translation.y = float(poses[0][1, 3])
-        pose.translation.z = float(poses[0][2, 3])
-        rotation = poses[0][0:3, 0:3]
+        poses = output.poses.cpu().numpy().reshape(-1,4,4)
+        conf = output.infos['pose_score'].to_numpy()
+        pose.translation.x = float(poses[0][0,3])
+        pose.translation.y = float(poses[0][1,3])
+        pose.translation.z = float(poses[0][2,3])
+        rotation = poses[0][0:3,0:3]
         rotation = transforms3d.quaternions.mat2quat(rotation)
+        pose.rotation.w = rotation[0]
         pose.rotation.x = rotation[1]
         pose.rotation.y = rotation[2]
         pose.rotation.z = rotation[3]
-        pose.rotation.w = rotation[0]
-        confidence = float(confidence[0])
-        # rospy.loginfo(f"init confidence: {confidence}")
-        # rospy.loginfo(f"init pose translation: x={pose.translation.x}, y={pose.translation.y}, z={pose.translation.z}")
-        # rospy.loginfo(f"init pose rotation: x={pose.rotation.x}, y={pose.rotation.y}, z={pose.rotation.z}, w={pose.rotation.w}")
+        confidence = float(conf[0])
         return pose, confidence
 
-    def TrackPoseCallback(self, request):
-        depth = None
+    def TrackPoseCallback(self, req):
+        # rospy.loginfo("TrackPose service request received")
+        bridge = CvBridge()
         pose = RosTransform()
         confidence = 0.0
-
-        # 影像轉換
-        bridge = CvBridge()
-        img = bridge.imgmsg_to_cv2(request.image, desired_encoding="rgb8")
-
-        # img = np.array(request.image.data).reshape((request.camera_info.height, request.camera_info.width, 3))
-        object_name = [request.object_name]
-
-        cTos_np = np.eye(4)
-        cTos_np[0:3, 3] = [request.init_pose.translation.x, request.init_pose.translation.y, request.init_pose.translation.z]
-        cTos_np[0:3, 0:3] = transforms3d.quaternions.quat2mat([request.init_pose.rotation.w, request.init_pose.rotation.x, request.init_pose.rotation.y, request.init_pose.rotation.z])
-        cTos_np = cTos_np.reshape(1, 4, 4)
-        tensor = torch.from_numpy(cTos_np).float().cuda()
-        infos = pd.DataFrame.from_dict({
+        try:
+            img = bridge.imgmsg_to_cv2(req.image, desired_encoding="rgb8")
+        except CvBridgeError as e:
+            rospy.logerr("CvBridge error: %s", e)
+            return pose, confidence
+        depth = None
+        if self.model_use_depth:
+            try:
+                depth_uint16 = bridge.imgmsg_to_cv2(req.depth, desired_encoding="passthrough")
+                depth = depth_uint16.astype(np.float32) / 1000.0  # 轉換為公尺單位
+            except CvBridgeError as e:
+                rospy.logerr("CvBridge error (depth): %s", e)
+                return pose, confidence
+        object_name = [req.object_name]
+        cTos = np.eye(4)
+        cTos[0:3,3] = [req.init_pose.translation.x, req.init_pose.translation.y, req.init_pose.translation.z]
+        cTos[0:3,0:3] = transforms3d.quaternions.quat2mat([
+            req.init_pose.rotation.w, req.init_pose.rotation.x,
+            req.init_pose.rotation.y, req.init_pose.rotation.z])
+        cTos = cTos.reshape(1,4,4)
+        tensor = torch.from_numpy(cTos).float().cuda()
+        infos = pd.DataFrame({
             'label': object_name,
-            'batch_im_id': [0 for _ in range(len(cTos_np))],
-            'instance_id': [i for i in range(len(cTos_np))]
+            'batch_im_id': [0],
+            'instance_id': [0]
         })
         coarse_estimates = PoseEstimatesType(infos, poses=tensor)
-
-        detections = None
         observation = self._make_observation_tensor(img, depth).cuda()
         inference_params = self.model_info['inference_parameters'].copy()
-        inference_params['n_refiner_iterations'] = request.refiner_iterations
+        inference_params['n_refiner_iterations'] = req.refiner_iterations
         output, extra_data = self.model.run_inference_pipeline(
-            observation, detections=detections, **inference_params, coarse_estimates=coarse_estimates
+            observation, detections=None, **inference_params, coarse_estimates=coarse_estimates
         )
-        poses = output.poses.cpu().numpy()
-        poses = poses.reshape(len(poses), 4, 4)
-        confidence = output.infos['pose_score'].to_numpy()
+        poses = output.poses.cpu().numpy().reshape(-1,4,4)
+        conf = output.infos['pose_score'].to_numpy()
         bounding_boxes = extra_data['scoring']['preds'].tensors['boxes_rend'].cpu().numpy().reshape(-1, 4)
         bounding_boxes = bounding_boxes.tolist()
 
-        pose.translation.x = float(poses[0][0, 3])
-        pose.translation.y = float(poses[0][1, 3])
-        pose.translation.z = float(poses[0][2, 3])
-        rotation = poses[0][0:3, 0:3]
+        pose.translation.x = float(poses[0][0,3])
+        pose.translation.y = float(poses[0][1,3])
+        pose.translation.z = float(poses[0][2,3])
+        rotation = poses[0][0:3,0:3]
         rotation = transforms3d.quaternions.mat2quat(rotation)
+        pose.rotation.w = rotation[0]
         pose.rotation.x = rotation[1]
         pose.rotation.y = rotation[2]
         pose.rotation.z = rotation[3]
-        pose.rotation.w = rotation[0]
-        confidence = float(confidence[0])
-        # rospy.loginfo(f"track confidence: {confidence}")
-        # rospy.loginfo(f"track pose translation: x={pose.translation.x}, y={pose.translation.y}, z={pose.translation.z}")
-        # rospy.loginfo(f"track pose rotation: x={pose.rotation.x}, y={pose.rotation.y}, z={pose.rotation.z}, w={pose.rotation.w}")
+        confidence = float(conf[0])
         return pose, confidence
 
     def RenderObjectCallback(self, request):
@@ -331,20 +354,69 @@ class MegaPoseServer:
         image.data = img
         return image
 
-    def _make_detections(self, labels, detections):
-        result = []
-        for label, detection in zip(labels, detections):
-            o = ObjectData(label)
-            o.bbox_modal = detection
-            result.append(o)
+    def _set_intrinsics(self, req):
+        K = np.asarray([[req.px, 0.0, req.u0],
+                        [0.0, req.py, req.v0],
+                        [0.0, 0.0, 1.0]])
+        cam_data = {'K': K, 'h': req.h, 'w': req.w}
+        self.camera_data = self._make_camera_data(cam_data)
+        # 若成功則回傳 True
+        from visp_megapose.srv import SetIntrinsicsResponse
+        return SetIntrinsicsResponse(True)
 
-        return make_detections_from_object_data(result)
+    def _score(self, req):
+        bridge = CvBridge()
+        try:
+            img = bridge.imgmsg_to_cv2(req.image, desired_encoding="rgb8")
+        except CvBridgeError as e:
+            rospy.logerr("CvBridge error: %s", e)
+            from visp_megapose.srv import GetScoreResponse
+            return GetScoreResponse([])
+        labels = req.labels
+        poses = req.cTos
+        pose_estimates = None
+        if poses:
+            cTos_np = np.array(poses).reshape(-1,4,4)
+            tensor = torch.from_numpy(cTos_np).float().cuda()
+            infos = pd.DataFrame({
+                'label': labels,
+                'batch_im_id': [0] * len(cTos_np),
+                'instance_id': list(range(len(cTos_np)))
+            })
+            pose_estimates = PoseEstimatesType(infos, poses=tensor)
+        observation = self._make_observation_tensor(img).cuda()
+        result = self.model.forward_scoring_model(observation, pose_estimates)
+        scores = result[0].infos['pose_score'].tolist()
+        from visp_megapose.srv import GetScoreResponse
+        return GetScoreResponse(scores)
 
-    def _make_observation_tensor(self, image: np.ndarray, depth: Optional[np.ndarray] = None) -> ObservationTensor:
-        '''
-        Create an observation tensor from an image and a potential depth image
-        '''
-        return ObservationTensor.from_numpy(image, depth, self.camera_data.K)
+    def _set_SO3_grid_size(self, req):
+        def random_quaternion(rand=None):
+            if rand is None:
+                rand = np.random.rand(3)
+            else:
+                assert len(rand) == 3
+            r1 = np.sqrt(1.0 - rand[0])
+            r2 = np.sqrt(rand[0])
+            pi2 = np.pi * 2.0
+            t1 = pi2 * rand[1]
+            t2 = pi2 * rand[2]
+            return np.array([np.sin(t1)*r1, np.cos(t1)*r1, np.sin(t2)*r2, np.cos(t2)*r2])
+        value = req.so3_grid_size
+        if value in [72, 512, 576, 4608]:
+            self.model.load_SO3_grid(value)
+        else:
+            rospy.logwarn("Non-standard SO(3) grid size, generating random orientations.")
+            import roma
+            Rs = roma.random_rotmat(value)
+            self.model._SO3_grid = Rs.cuda()
+        from visp_megapose.srv import SetSO3GridSizeResponse
+        return SetSO3GridSizeResponse(True)
+
+    def _list_objects(self, req):
+        from visp_megapose.srv import ListObjectsResponse
+        objects = list(self.object_dataset.label_to_objects.keys())
+        return ListObjectsResponse(objects)
 
 if __name__ == '__main__':
     MegaPoseServer()

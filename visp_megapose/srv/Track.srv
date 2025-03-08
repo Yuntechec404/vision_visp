@@ -6,6 +6,7 @@ geometry_msgs/Transform init_pose
 int16 refiner_iterations
 # The image in which the object is to be tracked.
 sensor_msgs/Image image
+sensor_msgs/Image depth        # 若不用則傳空 image
 # The camera parameters.
 sensor_msgs/CameraInfo camera_info
 ---
