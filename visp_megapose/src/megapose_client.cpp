@@ -324,6 +324,11 @@ void MegaPoseClient::frameCallback4(const sensor_msgs::ImageConstPtr &image,
   height_ = image->height;
   widthD_ = depth->width;
   heightD_ = depth->height;
+  if (width_ != widthD_ || height_ != heightD_)
+  {
+    ROS_ERROR("Image and depth image sizes do not match.");
+    return;
+  }
   // ROS_INFO ("Image width: %d, height: %d", width_, height_);
   // ROS_INFO ("Depth width: %d, height: %d", widthD_, heightD_);
   if(UIEnable)

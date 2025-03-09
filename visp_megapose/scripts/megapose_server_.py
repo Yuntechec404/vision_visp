@@ -219,18 +219,24 @@ class MegaPoseServer:
         depth = None
         if self.model_use_depth:
             try:
+                # depth_uint16 = bridge.imgmsg_to_cv2(req.depth, desired_encoding="passthrough")
+                # depth = depth_uint16.astype(np.float32) / 1.0
                 depth_uint16 = bridge.imgmsg_to_cv2(req.depth, desired_encoding="passthrough")
-                depth = depth_uint16.astype(np.float32) / 1.0
+                depth = depth_uint16.astype(np.float32) / 1000.0
             except CvBridgeError as e:
                 rospy.logerr("CvBridge error (depth): %s", e)
                 return pose, confidence
         # 更新相機資訊
-        cam_data = {
-            'K': np.asarray(req.camera_info.K).reshape(3,3),
+        camera_data = {
+            'K': np.asarray([
+                [req.camera_info.K[0], req.camera_info.K[1], req.camera_info.K[2]],
+                [req.camera_info.K[3], req.camera_info.K[4], req.camera_info.K[5]],
+                [req.camera_info.K[6], req.camera_info.K[7], req.camera_info.K[8]]
+            ]),
             'h': req.camera_info.height,
             'w': req.camera_info.width
         }
-        self.camera_data = self._make_camera_data(cam_data)
+        self.camera_data = self._make_camera_data(camera_data)
         # 物件偵測：利用請求中的 bounding box
         object_name = [req.object_name]
         detections = [[req.topleft_j, req.topleft_i, req.bottomright_j, req.bottomright_i]]
@@ -268,7 +274,7 @@ class MegaPoseServer:
         if self.model_use_depth:
             try:
                 depth_uint16 = bridge.imgmsg_to_cv2(req.depth, desired_encoding="passthrough")
-                depth = depth_uint16.astype(np.float32) / 1
+                depth = depth_uint16.astype(np.float32) / 1000.0
             except CvBridgeError as e:
                 rospy.logerr("CvBridge error (depth): %s", e)
                 return pose, confidence
@@ -280,10 +286,10 @@ class MegaPoseServer:
             req.init_pose.rotation.y, req.init_pose.rotation.z])
         cTos = cTos.reshape(1,4,4)
         tensor = torch.from_numpy(cTos).float().cuda()
-        infos = pd.DataFrame({
+        infos = pd.DataFrame.from_dict({
             'label': object_name,
-            'batch_im_id': [0],
-            'instance_id': [0]
+            'batch_im_id': [0 for _ in range(len(cTos))],
+            'instance_id': [i for i in range(len(cTos))]
         })
         coarse_estimates = PoseEstimatesType(infos, poses=tensor)
         observation = self._make_observation_tensor(img, depth).cuda()
@@ -292,7 +298,8 @@ class MegaPoseServer:
         output, extra_data = self.model.run_inference_pipeline(
             observation, detections=None, **inference_params, coarse_estimates=coarse_estimates
         )
-        poses = output.poses.cpu().numpy().reshape(-1,4,4)
+        poses = output.poses.cpu().numpy()
+        poses = poses.reshape(len(poses), 4, 4)
         conf = output.infos['pose_score'].to_numpy()
         bounding_boxes = extra_data['scoring']['preds'].tensors['boxes_rend'].cpu().numpy().reshape(-1, 4)
         bounding_boxes = bounding_boxes.tolist()

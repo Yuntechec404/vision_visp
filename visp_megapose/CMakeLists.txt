@@ -96,9 +96,9 @@ target_link_libraries(megapose_client
   ${OpenCV_LIBRARIES}
 )
 
-add_executable(image_sync src/image_sync.cpp)
-add_dependencies(image_sync ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(image_sync
+add_executable(depth_image_visualizer src/depth_image_visualizer.cpp)
+add_dependencies(depth_image_visualizer ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(depth_image_visualizer
   ${catkin_LIBRARIES}
   ${VISP_LIBRARIES}
   ${OpenCV_LIBRARIES}
