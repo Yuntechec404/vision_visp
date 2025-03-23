@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import rospy
 import csv
 from geometry_msgs.msg import Pose
@@ -34,7 +34,7 @@ class PoseFrequencyLoggerROS1:
 
 if __name__ == "__main__":
     rospy.init_node("pose_hz_logger")
-    topic = rospy.get_param("~topic", "/cube")
+    topic = rospy.get_param("~topic", "/pallet")
     output_csv = rospy.get_param("~output_csv", "ros1_pose_hz.csv")
     logger = PoseFrequencyLoggerROS1(topic, output_csv)
     rospy.spin()

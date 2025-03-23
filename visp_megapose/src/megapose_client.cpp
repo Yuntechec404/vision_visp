@@ -82,26 +82,12 @@ private:
   ros::NodeHandle* nh_;
   ros::NodeHandle* priv_nh_;
   ros::Subscriber detection_allowed_sub_;
-
-
-
-  message_filters::Subscriber<sensor_msgs::Image> image_sub_;
-  message_filters::Subscriber<sensor_msgs::CameraInfo> camera_info_sub_;
-
-  message_filters::Subscriber<sensor_msgs::Image> depth_sub_;
-  message_filters::Subscriber<sensor_msgs::CameraInfo> depth_info_sub_;
-
-  // 定義兩種同步策略：若不使用 depth，則同步 2 個話題；使用 depth 則同步 4 個話題
-  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::CameraInfo> SyncPolicy2;
-  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::CameraInfo,
-                                                          sensor_msgs::Image, sensor_msgs::CameraInfo> SyncPolicy4;
-  // 同步器物件（如果 use_depth 為 false，則使用 sync2_，若 true 則使用 sync4_）
-  boost::shared_ptr<message_filters::Synchronizer<SyncPolicy2> > sync2_;
-  boost::shared_ptr<message_filters::Synchronizer<SyncPolicy4> > sync4_;
-
+  ros::Subscriber image_sub_;
+  ros::Subscriber camera_info_sub_;
+  ros::Subscriber depth_sub_;
+  ros::Subscriber depth_info_sub_;
 
   DetectionAllowed detection_allowed_;
-  bool got_image_, got_depth_;
 
   std::string image_topic;
   std::string camera_info_topic;
@@ -129,7 +115,7 @@ private:
   double filt_x = 0.0, filt_y = 0.0, filt_z = 0.0, filt_qw = 0.0, filt_qx = 0.0, filt_qy = 0.0, filt_qz = 0.0;
 
   geometry_msgs::Transform transform_,filter_transform_;
-  unsigned width_, height_, widthD_, heightD_;
+  unsigned width_ = 0, height_ = 0, widthD_ = 0, heightD_ = 0;
 
   void initial_pose_service_response_callback(const visp_megapose::Init::Response& future);
   bool initialized_;
@@ -145,9 +131,10 @@ private:
   void waitForImage();
   void waitForDepth();
   void detectionAllowedCallback(const forklift_server::Detection &msg);
-  void frameCallback(const sensor_msgs::ImageConstPtr &image, const sensor_msgs::CameraInfoConstPtr &camera_info);
-  void frameCallback4(const sensor_msgs::ImageConstPtr &image, const sensor_msgs::CameraInfoConstPtr &cam_info,
-    const sensor_msgs::ImageConstPtr &depth, const sensor_msgs::CameraInfoConstPtr &depth_info);
+  void imageCallback(const sensor_msgs::ImageConstPtr &image);
+  void infoCallback(const sensor_msgs::CameraInfoConstPtr &cam_info);
+  void depthCallback(const sensor_msgs::ImageConstPtr &depth);
+  void depthInfoCallback(const sensor_msgs::CameraInfoConstPtr &depth_info);
   void overlayRender(const vpImage<vpRGBa> &overlay);
   DetectionMethod getDetectionMethodFromString(const std::string &str);
   void broadcastTransformAndPose(const geometry_msgs::Transform &transform, const std::string &objectName, const std::string &camera_tf);
@@ -174,38 +161,21 @@ MegaPoseClient::MegaPoseClient(ros::NodeHandle* nh, ros::NodeHandle* priv_nh)
     : nh_(nh), priv_nh_(priv_nh)
 {
   init_parameter();
-  image_sub_.subscribe(*nh_, image_topic, 1);
-  camera_info_sub_.subscribe(*nh_, camera_info_topic, 1);
   reinitThreshold_ = 0.2;
   refilterThreshold_ = 0.5;
   initialized_ = false;
-  got_image_ = false;
-  got_depth_ = false;
   // init_request_done_ = true;
   // track_request_done_ = true;
   // render_request_done_ = true;
   overlayModel_ = true;
   detection_allowed_sub_ = nh_->subscribe(objectName + "_detection", 1, &MegaPoseClient::detectionAllowedCallback, this);
 
+  image_sub_ = nh_->subscribe(image_topic, 1, &MegaPoseClient::imageCallback, this);
+  camera_info_sub_ = nh_->subscribe(camera_info_topic, 1, &MegaPoseClient::infoCallback, this);
   if (use_depth)
   {
-    // 當使用深度資訊時，同時訂閱 depth 話題與 depth 相機資訊
-    depth_sub_.subscribe(*nh_, depth_topic, 1);
-    depth_info_sub_.subscribe(*nh_, depth_info_topic, 1);
-    // 建立四話題同步器
-    boost::shared_ptr<message_filters::Synchronizer<SyncPolicy4> > sync4_temp(
-        new message_filters::Synchronizer<SyncPolicy4>(SyncPolicy4(1),
-            image_sub_, camera_info_sub_, depth_sub_, depth_info_sub_));
-    sync4_ = sync4_temp;
-    sync4_->registerCallback(boost::bind(&MegaPoseClient::frameCallback4, this, _1, _2, _3, _4));
-  }
-  else
-  {
-    // 如果不使用深度，則同步兩個話題即可
-    boost::shared_ptr<message_filters::Synchronizer<SyncPolicy2> > sync2_temp(
-        new message_filters::Synchronizer<SyncPolicy2>(SyncPolicy2(1), image_sub_, camera_info_sub_));
-    sync2_ = sync2_temp;
-    sync2_->registerCallback(boost::bind(&MegaPoseClient::frameCallback, this, _1, _2));
+    depth_sub_ = nh_->subscribe(depth_topic, 1, &MegaPoseClient::depthCallback, this);
+    depth_info_sub_ = nh_->subscribe(depth_info_topic, 1, &MegaPoseClient::depthInfoCallback, this);
   }
 
   ROS_INFO("MegaPoseClient initialized.");
@@ -271,7 +241,7 @@ void MegaPoseClient::waitForImage()
   ROS_INFO("Waiting for a rectified image...");
   while (ros::ok())
   {
-    if (got_image_)
+    if (width_ > 0 && height_ > 0)
     {
       ROS_INFO("Got image!");
       return;
@@ -287,7 +257,7 @@ void MegaPoseClient::waitForDepth()
   ROS_INFO("Waiting for a rectified depth...");
   while (ros::ok())
   {
-    if (got_depth_)
+    if (widthD_ > 0 && heightD_ > 0)
     {
       ROS_INFO("Got image!");
       return;
@@ -297,47 +267,58 @@ void MegaPoseClient::waitForDepth()
   }
 }
 
-void MegaPoseClient::frameCallback(const sensor_msgs::ImageConstPtr &image,
-                                   const sensor_msgs::CameraInfoConstPtr &cam_info)
+void MegaPoseClient::imageCallback(const sensor_msgs::ImageConstPtr &image)
 {
   rosI_ = image;
-  roscam_info_ = cam_info;
   width_ = image->width;
   height_ = image->height;
   if(UIEnable)
   {
     vpI_ = visp_bridge::toVispImageRGBa(*image);
-    vpcam_info_ = visp_bridge::toVispCameraParameters(*cam_info);
   }
-  got_image_ = true;
 }
 
-void MegaPoseClient::frameCallback4(const sensor_msgs::ImageConstPtr &image,
-  const sensor_msgs::CameraInfoConstPtr &cam_info,
-  const sensor_msgs::ImageConstPtr &depth,
-  const sensor_msgs::CameraInfoConstPtr &depth_info)
+void MegaPoseClient::infoCallback(const sensor_msgs::CameraInfoConstPtr &cam_info)
 {
-  rosI_ = image;
-  rosD_ = depth;
   roscam_info_ = cam_info;
-  width_ = image->width;
-  height_ = image->height;
+  if(UIEnable)
+  {
+    vpcam_info_ = visp_bridge::toVispCameraParameters(*cam_info);
+  }
+}
+
+void MegaPoseClient::depthCallback(const sensor_msgs::ImageConstPtr &depth)
+{
+  rosD_ = depth;
   widthD_ = depth->width;
   heightD_ = depth->height;
-  if (width_ != widthD_ || height_ != heightD_)
+  if (width_ == 0 || height_ == 0)
+  {
+    // ROS_ERROR("Image size is 0. Waiting for image.");
+    return;
+  }
+  else if (width_ != widthD_ || height_ != heightD_)
   {
     ROS_ERROR("Image and depth image sizes do not match.");
     return;
   }
+  
   // ROS_INFO ("Image width: %d, height: %d", width_, height_);
   // ROS_INFO ("Depth width: %d, height: %d", widthD_, heightD_);
-  if(UIEnable)
+}
+
+void MegaPoseClient::depthInfoCallback(const sensor_msgs::CameraInfoConstPtr &depth_info)
+{
+  if (width_ == 0 || height_ == 0)
   {
-    vpI_ = visp_bridge::toVispImageRGBa(*image);
-    vpcam_info_ = visp_bridge::toVispCameraParameters(*cam_info);
+    // ROS_ERROR("Image size is 0. Waiting for image.");
+    return;
   }
-  got_image_ = true;
-  got_depth_ = true;
+  else if (width_ != widthD_ || height_ != heightD_)
+  {
+    ROS_ERROR("Image and depth image sizes do not match.");
+    return;
+  }
 }
 
 void MegaPoseClient::detectionAllowedCallback(const forklift_server::Detection &msg)
@@ -638,12 +619,12 @@ void MegaPoseClient::spin()
       
       M_original = visp_bridge::toVispHomogeneousMatrix(transform_);
       // transformToVispHomogeneousMatrix(transform_, M_original);
-      // vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::red, 3);
+      vpDisplay::displayFrame(vpI_, M_original, vpcam_info_, 0.05, vpColor::none, 3);
       displayScore(confidence_);
       broadcastTransformAndPose(transform_, objectName, camera_tf);
       broadcastTransformAndPose_filter(transform_, objectName);
       M_filter = visp_bridge::toVispHomogeneousMatrix(filter_transform_);
-      vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::none, 3);
+      // vpDisplay::displayFrame(vpI_, M_filter, vpcam_info_, 0.05, vpColor::none, 3);
       // init_request_done_ = true;
       // track_request_done_ = true;
       // render_request_done_ = true;

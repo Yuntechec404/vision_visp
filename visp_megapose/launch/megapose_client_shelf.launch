@@ -4,9 +4,9 @@
     <!-- 設定影像主題與相機資訊主題 -->
     <param name="image_topic" value="/camera/color/image_raw"/>
     <param name="camera_info_topic" value="/camera/color/camera_info"/>
-    <param name="use_depth" value="True"/>
-    <param name="depth_topic" value="/camera/depth/image_rect_raw"/>
-    <param name="depth_info_topic" value="/camera/depth/camera_info"/>
+    <param name="use_depth" value="False"/>
+    <param name="depth_topic" value="/camera/aligned_depth_to_color/image_raw"/>
+    <param name="depth_info_topic" value="/camera/aligned_depth_to_color/camera_info"/>
     <param name="camera_tf" value="camera_color_optical_frame"/>
     <!-- 選擇檢測方法 (CLICK 或 DNN) -->
     <param name="detector_method" value="DNN"/>  
