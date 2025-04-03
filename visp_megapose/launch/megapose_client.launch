@@ -15,7 +15,7 @@
     <!-- 設定 DNN 檢測物體名稱 -->
     <param name="object_name" value="cube"/>
     <!-- 啟用或禁用渲染服務(True or False) -->
-    <param name="render_enable" value="True"/>
+    <param name="render_enable" value="False"/>
     <!-- 啟用或禁用 UI(True or False) -->
     <param name="UI_enable" value="True"/>
     <!-- 設定檢測模式(Auto 或 Manual) -->

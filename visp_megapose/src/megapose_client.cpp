@@ -146,7 +146,7 @@ private:
   void transformToVispHomogeneousMatrix(const geometry_msgs::Transform& transform, vpHomogeneousMatrix &M);
   std::optional<vpRect> detectObjectForInitMegaposeClick();
   std::optional<vpRect> detectObjectForInitMegaposeDnn(const std::string &detectionLabel, double confidenceThreshold);
-  void displayBoundingBoxOnVispWindow(const std::string &detectionLabel, const std::optional<vpRect> &bboxOpt);
+  void displayBoundingBoxOnVispWindow(const std::string &detectionLabel,const double confidence, const std::optional<vpRect> &bboxOpt);
   vpImage<vpRGBa> overlay_img_;
   vpCameraParameters vpcam_info_;
   vpDetectorDNNOpenCV dnn_;
@@ -806,7 +806,7 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
     // 設定 bounding box
     if (bounding_box)
     {
-      displayBoundingBoxOnVispWindow(detectionLabel, matchingDetections[0].getBoundingBox());
+      displayBoundingBoxOnVispWindow(detectionLabel, matchingDetections[0].getConfidenceScore(), matchingDetections[0].getBoundingBox());
     }
     return matchingDetections[0].getBoundingBox();
   }
@@ -817,7 +817,7 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
     // 設定 bounding box
     if (bounding_box)
     {
-      displayBoundingBoxOnVispWindow(detectionLabel, detection.getBoundingBox());
+      displayBoundingBoxOnVispWindow(detectionLabel, detection.getConfidenceScore(), detection.getBoundingBox());
     }
   }
   auto bestDetection = std::max_element(
@@ -831,13 +831,16 @@ std::optional<vpRect> MegaPoseClient::detectObjectForInitMegaposeDnn(const std::
       if (detection_allowed_.layer == 2.0) {
         return bottomA > bottomB;
       }
+      else if (detection_allowed_.layer == 0.0){
+        return a.getConfidenceScore() < b.getConfidenceScore();
+      }
       return bottomA < bottomB;
     });
   check_wait_time = 0;
   return bestDetection->getBoundingBox();
 }
 
-void MegaPoseClient::displayBoundingBoxOnVispWindow(const std::string &detectionLabel, const std::optional<vpRect> &bboxOpt)
+void MegaPoseClient::displayBoundingBoxOnVispWindow(const std::string &detectionLabel, double confidence, const std::optional<vpRect> &bboxOpt)
 {
   vpRect bbox = bboxOpt.value();
   vpImagePoint ip1(static_cast<int>(bbox.getTop()), static_cast<int>(bbox.getLeft()));    // 左上角
@@ -850,8 +853,12 @@ void MegaPoseClient::displayBoundingBoxOnVispWindow(const std::string &detection
   vpDisplay::displayLine(vpI_, ip3, ip4, vpColor::red, 2, true);
   vpDisplay::displayLine(vpI_, ip4, ip1, vpColor::red, 2, true);
   
-  // 在矩形左上方顯示 detectionLabel
-  vpDisplay::displayText(vpI_, static_cast<int>(bbox.getTop()) - 10, static_cast<int>(bbox.getLeft()), detectionLabel, vpColor::red);
+  // 準備顯示的文字，包括檢測標籤和信心指數
+  std::ostringstream text;
+  text << detectionLabel << " (" << std::fixed << std::setprecision(2) << confidence * 100 << "%)";
+
+  // 在矩形框上方顯示文字
+  vpDisplay::displayText(vpI_, static_cast<int>(bbox.getTop()) - 10, static_cast<int>(bbox.getLeft()), text.str(), vpColor::red);
   vpDisplay::flush(vpI_); // 刷新顯示結果
 }
 
