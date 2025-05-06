@@ -36,7 +36,7 @@
     <!-- 啟用或禁用 UI(True or False) -->
     <param name="UI_enable" value="True"/>
     <!-- 設定檢測模式(Auto 或 Manual) -->
-    <param name="detection_mode" value="Auto"/>
+    <param name="detection_mode" value="Manual"/>
     <!-- 設定檢測允許主題 -->
     <!-- <param name="detection_allowed_topic" value="/pallet_detection"/> -->
     <!-- 設定moving average filter -->
