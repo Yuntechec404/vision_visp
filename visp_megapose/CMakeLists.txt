@@ -17,7 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   rospy
   message_generation
-  forklift_server
+  forklift_msg
 )
 
 ## 設定自編譯 ViSP 的目錄
@@ -75,7 +75,7 @@ catkin_package(
   roscpp
   visp_bridge
   cv_bridge
-  forklift_server
+  forklift_msg
   DEPENDS VISP
 )
 

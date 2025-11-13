@@ -36,7 +36,7 @@
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/Image.h>
 #include <geometry_msgs/Pose.h>
-#include <forklift_server/Detection.h>
+#include <forklift_msg/Detection.h>
 
 // ROS 1 message filters
 #include <message_filters/subscriber.h>
@@ -130,7 +130,7 @@ private:
   void init_parameter();
   void waitForImage();
   void waitForDepth();
-  void detectionAllowedCallback(const forklift_server::Detection &msg);
+  void detectionAllowedCallback(const forklift_msg::Detection &msg);
   void imageCallback(const sensor_msgs::ImageConstPtr &image);
   void infoCallback(const sensor_msgs::CameraInfoConstPtr &cam_info);
   void depthCallback(const sensor_msgs::ImageConstPtr &depth);
@@ -321,7 +321,7 @@ void MegaPoseClient::depthInfoCallback(const sensor_msgs::CameraInfoConstPtr &de
   }
 }
 
-void MegaPoseClient::detectionAllowedCallback(const forklift_server::Detection &msg)
+void MegaPoseClient::detectionAllowedCallback(const forklift_msg::Detection &msg)
 {
   detection_allowed_.detection_allowed = msg.detection_allowed;
   detection_allowed_.layer = msg.layer;
